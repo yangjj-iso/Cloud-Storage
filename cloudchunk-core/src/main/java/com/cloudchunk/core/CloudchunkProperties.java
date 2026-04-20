@@ -9,6 +9,9 @@ public class CloudchunkProperties {
 
     private Chunk chunk = new Chunk();
     private Upload upload = new Upload();
+    private Executor executor = new Executor();
+    private RateLimit rateLimit = new RateLimit();
+    private Cache cache = new Cache();
 
     public static class Chunk {
         private int defaultSize = 5 * 1024 * 1024;
@@ -36,8 +39,68 @@ public class CloudchunkProperties {
         public void setAutoMerge(boolean autoMerge) { this.autoMerge = autoMerge; }
     }
 
+    /** 后台执行器容量：对外部系统（MinIO / MQ / DB）的并发上限 */
+    public static class Executor {
+        /** 对 MinIO / MQ 的通用 I/O 并发上限 */
+        private int ioConcurrency = 64;
+        /** 合并后清理分片、孤儿对象回收等粗粒度任务 */
+        private int cleanupConcurrency = 32;
+        /** 无法立即拿到许可时的等待时间（超时则拒绝） */
+        private long acquireTimeoutMs = 500;
+
+        public int getIoConcurrency() { return ioConcurrency; }
+        public void setIoConcurrency(int ioConcurrency) { this.ioConcurrency = ioConcurrency; }
+        public int getCleanupConcurrency() { return cleanupConcurrency; }
+        public void setCleanupConcurrency(int cleanupConcurrency) { this.cleanupConcurrency = cleanupConcurrency; }
+        public long getAcquireTimeoutMs() { return acquireTimeoutMs; }
+        public void setAcquireTimeoutMs(long acquireTimeoutMs) { this.acquireTimeoutMs = acquireTimeoutMs; }
+    }
+
+    /** Redis 令牌桶限流配置（per-user） */
+    public static class RateLimit {
+        private boolean enabled = true;
+        /** 分片上传：每用户每秒最多允许的请求速率（令牌补充速率 tokens/s） */
+        private int uploadChunkRps = 30;
+        /** 令牌桶容量（允许的瞬时突发） */
+        private int uploadChunkBurst = 60;
+        /** 下载：每用户每秒请求速率 */
+        private int downloadRps = 50;
+        private int downloadBurst = 100;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getUploadChunkRps() { return uploadChunkRps; }
+        public void setUploadChunkRps(int uploadChunkRps) { this.uploadChunkRps = uploadChunkRps; }
+        public int getUploadChunkBurst() { return uploadChunkBurst; }
+        public void setUploadChunkBurst(int uploadChunkBurst) { this.uploadChunkBurst = uploadChunkBurst; }
+        public int getDownloadRps() { return downloadRps; }
+        public void setDownloadRps(int downloadRps) { this.downloadRps = downloadRps; }
+        public int getDownloadBurst() { return downloadBurst; }
+        public void setDownloadBurst(int downloadBurst) { this.downloadBurst = downloadBurst; }
+    }
+
+    /** FileMeta 本地 Caffeine 缓存 */
+    public static class Cache {
+        private boolean fileMetaEnabled = true;
+        private int fileMetaMaxSize = 20000;
+        private Duration fileMetaTtl = Duration.ofMinutes(5);
+
+        public boolean isFileMetaEnabled() { return fileMetaEnabled; }
+        public void setFileMetaEnabled(boolean fileMetaEnabled) { this.fileMetaEnabled = fileMetaEnabled; }
+        public int getFileMetaMaxSize() { return fileMetaMaxSize; }
+        public void setFileMetaMaxSize(int fileMetaMaxSize) { this.fileMetaMaxSize = fileMetaMaxSize; }
+        public Duration getFileMetaTtl() { return fileMetaTtl; }
+        public void setFileMetaTtl(Duration fileMetaTtl) { this.fileMetaTtl = fileMetaTtl; }
+    }
+
     public Chunk getChunk() { return chunk; }
     public void setChunk(Chunk chunk) { this.chunk = chunk; }
     public Upload getUpload() { return upload; }
     public void setUpload(Upload upload) { this.upload = upload; }
+    public Executor getExecutor() { return executor; }
+    public void setExecutor(Executor executor) { this.executor = executor; }
+    public RateLimit getRateLimit() { return rateLimit; }
+    public void setRateLimit(RateLimit rateLimit) { this.rateLimit = rateLimit; }
+    public Cache getCache() { return cache; }
+    public void setCache(Cache cache) { this.cache = cache; }
 }

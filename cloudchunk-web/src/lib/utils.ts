@@ -38,11 +38,11 @@ export function formatDate(iso?: string | null): string {
 }
 
 export function guessChunkSize(fileSize: number): number {
-  // between 2MB and 20MB, aim for ~50-200 chunks
+  // aim for ~50-150 chunks per file
   if (fileSize < 50 * 1024 * 1024) return 2 * 1024 * 1024;
-  if (fileSize < 500 * 1024 * 1024) return 5 * 1024 * 1024;
-  if (fileSize < 2 * 1024 * 1024 * 1024) return 10 * 1024 * 1024;
-  return 20 * 1024 * 1024;
+  if (fileSize < 500 * 1024 * 1024) return 10 * 1024 * 1024;
+  if (fileSize < 2 * 1024 * 1024 * 1024) return 20 * 1024 * 1024;
+  return 40 * 1024 * 1024;
 }
 
 export function mimeCategory(mime: string | undefined): 'image' | 'video' | 'audio' | 'doc' | 'archive' | 'other' {

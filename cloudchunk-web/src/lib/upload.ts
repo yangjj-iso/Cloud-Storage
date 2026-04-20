@@ -1,9 +1,28 @@
 import { api } from './api';
-import { md5OfBlob, md5OfChunk } from './md5';
+import { hashFileWorker } from './md5';
 import { guessChunkSize } from './utils';
+import {
+  hashCacheKey,
+  getHashCache,
+  setHashCache,
+  saveUploadState,
+  delUploadState,
+} from './idb';
 import type { UploadTask, UploadTaskStatus } from '../types';
 
-const CONCURRENT_CHUNKS = 3;
+/* ---------- 动态并发参数 ---------- */
+const MIN_CONCURRENCY = 2;
+const MAX_CONCURRENCY = 10;
+const INITIAL_CONCURRENCY = 3;
+/** 连续 N 片成功且单片 < TARGET_MS 则加一路并发 */
+const RAMP_UP_STREAK = 3;
+const TARGET_CHUNK_MS = 3000;
+/** 单片超过此时长则收缩并发 */
+const SLOW_CHUNK_MS = 8000;
+
+/* ---------- 重试参数 ---------- */
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 500;   // 指数退避基数
 
 export interface UploadCallbacks {
   onStatus: (status: UploadTaskStatus, patch?: Partial<UploadTask>) => void;
@@ -22,13 +41,29 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
 
   let stage: 'HASH' | 'INIT' | 'UPLOAD' | 'MERGE' = 'HASH';
   try {
-    // 1. hash
+    // 1. single-pass hash（优先 IndexedDB 缓存命中，跳过整次文件读取）
     cb.onStatus('HASHING', { startedAt: Date.now() });
     const chunkSize = guessChunkSize(file.size);
     const chunkTotal = Math.max(1, Math.ceil(file.size / chunkSize));
-    const md5 = await md5OfBlob(file, (done, total) => {
-      cb.onHashProgress(done, total);
-    });
+    const cacheKey = hashCacheKey(file, chunkSize);
+    let md5: string;
+    let chunkHashes: string[];
+    const cached = await getHashCache(cacheKey);
+    if (cached) {
+      md5 = cached.fileMd5;
+      chunkHashes = cached.chunkHashes;
+      cb.onHashProgress(file.size, file.size);
+    } else {
+      const result = await hashFileWorker(
+        file,
+        chunkSize,
+        (done: number, total: number) => cb.onHashProgress(done, total),
+      );
+      md5 = result.fileMd5;
+      chunkHashes = result.chunkHashes;
+      // 持久化 hash 结果到 IndexedDB，下次拖入同文件直接秒出
+      setHashCache({ key: cacheKey, fileMd5: md5, chunkHashes, chunkSize, cachedAt: Date.now() }).catch(() => {});
+    }
     throwIfAborted();
 
     // 2. init
@@ -62,48 +97,188 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
       bytesTransferred: uploaded.size * actualChunkSize,
     });
 
-    // 3. upload missing chunks with concurrency cap
+    // 2.5 chunk-level dedup：发送缺失分片 MD5 给后端，服务端拷贝命中的分片
     stage = 'UPLOAD';
+    const missingBefore: number[] = [];
+    for (let i = 0; i < actualChunkTotal; i++) if (!uploaded.has(i)) missingBefore.push(i);
+    if (missingBefore.length > 0 && missingBefore.length < actualChunkTotal) {
+      try {
+        const md5Map: Record<number, string> = {};
+        for (const idx of missingBefore) md5Map[idx] = chunkHashes[idx];
+        const deduped = await api.dedupChunks(init.fileId, md5Map);
+        for (const idx of deduped) uploaded.add(idx);
+        if (deduped.length > 0) {
+          cb.onStatus('UPLOADING', {
+            uploadedChunks: uploaded.size,
+            bytesTransferred: uploaded.size * actualChunkSize,
+          });
+        }
+      } catch {
+        // dedup 失败不影响正常上传
+      }
+      throwIfAborted();
+    }
+
+    // 3. upload remaining chunks — presigned PUT 直传 + 动态并发 + 指数退避重试
     const indices: number[] = [];
     for (let i = 0; i < actualChunkTotal; i++) if (!uploaded.has(i)) indices.push(i);
     let bytesSoFar = uploaded.size * actualChunkSize;
     const startTs = Date.now();
-    let cursor = 0;
 
-    async function worker(): Promise<void> {
-      while (cursor < indices.length) {
-        const idx = indices[cursor++];
-        throwIfAborted();
-        const start = idx * actualChunkSize;
-        const end = Math.min(start + actualChunkSize, file.size);
-        const blob = file.slice(start, end);
-        const chunkMd5 = await md5OfChunk(blob);
-        throwIfAborted();
-        await api.uploadChunk(
-          {
-            fileId: init.fileId,
-            chunkIndex: idx,
-            chunkMd5,
-            chunkSize: blob.size,
-            blob,
-          },
-          abortSignal
-        );
-        bytesSoFar += blob.size;
-        const elapsed = (Date.now() - startTs) / 1000;
-        const speed = elapsed > 0 ? bytesSoFar / elapsed : 0;
-        cb.onChunkDone(idx, blob.size, speed);
+    // 预签名 URL 缓存 + 批量预取
+    const PRESIGN_BATCH = 50;
+    let presignedUrls: Record<string, string> = {};
+    let presignFetched = 0;
+    let usePresign = true; // 首次失败后降级为 backend proxy
+
+    async function ensurePresigned(needed: number): Promise<void> {
+      if (!usePresign || presignFetched >= indices.length) return;
+      const from = presignFetched;
+      const to = Math.min(presignFetched + Math.max(PRESIGN_BATCH, needed), indices.length);
+      const batch = indices.slice(from, to);
+      try {
+        const urls = await api.presignChunks(init.fileId, batch);
+        Object.assign(presignedUrls, urls);
+        presignFetched = to;
+      } catch {
+        usePresign = false;
+        console.warn('[upload] presign failed, falling back to backend proxy');
       }
     }
 
-    const workers = Array.from({ length: Math.min(CONCURRENT_CHUNKS, indices.length || 1) }, worker);
-    await Promise.all(workers);
+    // 共享游标 + 动态并发控制
+    let cursor = 0;
+    let concurrency = Math.min(INITIAL_CONCURRENCY, indices.length || 1);
+    let fastStreak = 0;
+    let activeWorkers = 0;
+    let firstError: Error | null = null;
+
+    /** 单片上传（带重试），优先 presigned PUT 直传 MinIO */
+    async function uploadOneChunk(idx: number): Promise<number> {
+      const start = idx * actualChunkSize;
+      const end = Math.min(start + actualChunkSize, file.size);
+      const blob = file.slice(start, end);
+      const chunkMd5 = chunkHashes[idx];
+      const presignUrl = presignedUrls[String(idx)];
+
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        throwIfAborted();
+        try {
+          const t0 = Date.now();
+          if (presignUrl && usePresign) {
+            // 直传 MinIO：数据不经过后端
+            const putRes = await fetch(presignUrl, {
+              method: 'PUT',
+              body: blob,
+              signal: abortSignal,
+            });
+            if (!putRes.ok) throw new Error(`MinIO PUT ${putRes.status}`);
+            // 回调后端确认（仅元数据，无数据传输）
+            await api.confirmChunk(init.fileId, idx, chunkMd5);
+          } else {
+            // 降级：通过后端代理上传
+            await api.uploadChunk(
+              { fileId: init.fileId, chunkIndex: idx, chunkMd5, chunkSize: blob.size, blob },
+              abortSignal,
+            );
+          }
+          return Date.now() - t0;
+        } catch (e) {
+          if ((e as { name?: string }).name === 'AbortError') throw e;
+          // presigned PUT 失败可能是 CORS，降级到 backend proxy 重试
+          if (presignUrl && usePresign && attempt === 0) {
+            usePresign = false;
+            console.warn('[upload] presigned PUT failed, degrading to backend proxy', e);
+            continue;
+          }
+          if (attempt >= MAX_RETRIES) throw e;
+          const delay = RETRY_BASE_MS * Math.pow(2, attempt);
+          console.warn(`[upload] chunk ${idx} attempt ${attempt + 1} failed, retry in ${delay}ms`, e);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+      return 0; // unreachable
+    }
+
+    /** 工人：不断取下一个分片上传 */
+    async function worker(): Promise<void> {
+      activeWorkers++;
+      try {
+        while (cursor < indices.length && !firstError) {
+          // 预签名 URL 预取：当游标接近已取范围时提前批量获取
+          if (usePresign && cursor >= presignFetched - concurrency) {
+            await ensurePresigned(concurrency);
+          }
+          const idx = indices[cursor++];
+          const elapsed_ms = await uploadOneChunk(idx);
+
+          bytesSoFar += Math.min(actualChunkSize, file.size - idx * actualChunkSize);
+          const elapsed = (Date.now() - startTs) / 1000;
+          const speed = elapsed > 0 ? bytesSoFar / elapsed : 0;
+          cb.onChunkDone(idx, actualChunkSize, speed);
+
+          // 每 10 片持久化一次上传进度到 IndexedDB（断电 / 关标签页后可恢复）
+          if (idx % 10 === 0 || cursor >= indices.length) {
+            const doneSet = [...uploaded];
+            for (let j = 0; j < cursor; j++) doneSet.push(indices[j]);
+            saveUploadState({
+              fileId: init.fileId,
+              fileMd5: md5,
+              fileName: file.name,
+              fileSize: file.size,
+              chunkSize: actualChunkSize,
+              chunkTotal: actualChunkTotal,
+              uploadedChunks: doneSet,
+              savedAt: Date.now(),
+            }).catch(() => {});
+          }
+
+          // ---- 动态并发调节 ----
+          if (elapsed_ms < TARGET_CHUNK_MS) {
+            fastStreak++;
+            if (fastStreak >= RAMP_UP_STREAK && concurrency < MAX_CONCURRENCY) {
+              concurrency++;
+              fastStreak = 0;
+              // 启动新 worker
+              if (activeWorkers < concurrency && cursor < indices.length) {
+                worker(); // fire-and-forget
+              }
+            }
+          } else {
+            fastStreak = 0;
+            if (elapsed_ms > SLOW_CHUNK_MS && concurrency > MIN_CONCURRENCY) {
+              concurrency--;
+              // 当前 worker 自行退出以降低并发
+              if (activeWorkers > concurrency) return;
+            }
+          }
+        }
+      } catch (e) {
+        if (!firstError && (e as { name?: string }).name !== 'AbortError') {
+          firstError = e instanceof Error ? e : new Error(String(e));
+        }
+        throw e;
+      } finally {
+        activeWorkers--;
+      }
+    }
+
+    // 首批预签名 URL 预取
+    await ensurePresigned(PRESIGN_BATCH);
+
+    const initialWorkers = Math.min(concurrency, indices.length || 1);
+    const promises: Promise<void>[] = [];
+    for (let i = 0; i < initialWorkers; i++) promises.push(worker());
+    await Promise.allSettled(promises);
+    if (firstError) throw firstError;
     throwIfAborted();
 
     // 4. merge (server may have auto-merged already; call is idempotent)
     stage = 'MERGE';
     cb.onStatus('MERGING');
     await api.mergeUpload(init.fileId);
+    // 上传成功，清除 IndexedDB 持久化状态
+    delUploadState(init.fileId).catch(() => {});
     cb.onStatus('DONE', { finishedAt: Date.now() });
     cb.onDone(init.fileId);
   } catch (e) {

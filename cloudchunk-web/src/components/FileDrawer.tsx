@@ -59,14 +59,26 @@ export function FileDrawer() {
   }, [fileId]);
 
   const onDownload = async () => {
-    if (!meta || !url) {
-      window.open(url || downloadUrl(fileId!), '_blank');
+    if (!meta) {
+      window.open(downloadUrl(fileId!), '_blank');
       return;
+    }
+    // 优先直连 MinIO 预签名 URL，跳过后端代理，吞吐更高
+    let dlUrl = url;
+    if (!dlUrl) {
+      try {
+        const r = await api.fileUrl(fileId!, 900);
+        dlUrl = r.url;
+        setUrl(dlUrl);
+      } catch {
+        window.open(downloadUrl(fileId!), '_blank');
+        return;
+      }
     }
     setDlProgress({ loaded: 0, total: meta.fileSize, percent: 0 });
     try {
       await downloadFile({
-        url,
+        url: dlUrl,
         fileName: meta.fileName,
         fileSize: meta.fileSize,
         onProgress: setDlProgress,

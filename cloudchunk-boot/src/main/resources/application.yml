@@ -1,10 +1,24 @@
 server:
   port: 8080
+  http2:
+    enabled: true   # h2c(dev) / h2(TLS prod)：多路复用，分片请求共享一条 TCP 连接
   compression:
     enabled: true
+    mime-types: application/json,application/xml,text/plain,text/html,text/css,application/javascript
+    min-response-size: 1024
   forward-headers-strategy: native
   tomcat:
     max-swallow-size: -1
+    threads:
+      # 开启虚拟线程后这里的 max 更像是对"同时握住的平台线程上限"的兜底；
+      # 入口仍是 NIO，长时间连接不会占用平台线程。
+      max: 400
+      min-spare: 20
+    max-connections: 10000
+    accept-count: 500
+    connection-timeout: 20s
+    # TCP 层小包优化：降低小响应的延迟
+    processor-cache: 400
 
 spring:
   profiles:
@@ -16,17 +30,17 @@ spring:
       enabled: true
   servlet:
     multipart:
-      # 需要大于 cloudchunk.chunk.max-size（默认 100MB）再留一点 multipart 边角
-      max-file-size: 120MB
-      max-request-size: 130MB
+      # 需要大于 cloudchunk.chunk.max-size（200MB）再留一点 multipart 边角
+      max-file-size: 220MB
+      max-request-size: 230MB
       file-size-threshold: 2MB
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3308}/${MYSQL_DB:cloudchunk}?useSSL=false&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:root}
     hikari:
-      maximum-pool-size: 30
-      minimum-idle: 5
+      maximum-pool-size: 50
+      minimum-idle: 8
       connection-timeout: 3000
   data:
     redis:
@@ -56,12 +70,12 @@ rocketmq:
 
 cloudchunk:
   chunk:
-    default-size: 5242880
+    default-size: 10485760    # 10 MB
     min-size: 1048576
-    max-size: 104857600
+    max-size: 209715200       # 200 MB
     session-ttl: PT24H
   upload:
-    md5-verify-thread-pool: 4
+    md5-verify-thread-pool: 16
     auto-merge: true
   storage:
     type: ${STORAGE_TYPE:minio}
@@ -77,6 +91,20 @@ cloudchunk:
     local:
       root: ${LOCAL_ROOT:./local-storage}
       base-url: ${LOCAL_BASE_URL:http://localhost:8080/api/v1/file}
+  executor:
+    io-concurrency: 64
+    cleanup-concurrency: 32
+    acquire-timeout-ms: 500
+  cache:
+    file-meta-enabled: true
+    file-meta-max-size: 20000
+    file-meta-ttl: PT5M
+  rate-limit:
+    enabled: true
+    upload-chunk-rps: 30
+    upload-chunk-burst: 60
+    download-rps: 50
+    download-burst: 100
   transcode:
     ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
     video-task-timeout: PT30M
@@ -92,7 +120,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,caches,prometheus
   endpoint:
     health:
       show-details: when_authorized

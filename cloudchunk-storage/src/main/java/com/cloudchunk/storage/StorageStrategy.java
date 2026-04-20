@@ -35,6 +35,11 @@ public interface StorageStrategy {
         throw new UnsupportedOperationException("presignUpload not supported by " + type());
     }
 
+    /** 服务端对象拷贝（chunk dedup 用：相同内容分片零网络开销复制） */
+    default void copy(String srcBucket, String srcKey, String dstBucket, String dstKey) {
+        throw new UnsupportedOperationException("copy not supported by " + type());
+    }
+
     void delete(String bucket, String objectKey);
 
     void deleteBatch(String bucket, List<String> keys);

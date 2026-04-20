@@ -123,19 +123,51 @@ export const api = {
     },
     signal?: AbortSignal
   ): Promise<ChunkUploadResponse> => {
-    const form = new FormData();
-    form.append('fileId', args.fileId);
-    form.append('chunkIndex', String(args.chunkIndex));
-    form.append('chunkMd5', args.chunkMd5);
-    form.append('chunkSize', String(args.chunkSize));
-    form.append('file', args.blob, `${args.fileId}.${args.chunkIndex}`);
-    const res = await fetch(`${API_BASE}/upload/chunk`, {
+    const q = new URLSearchParams({
+      fileId: args.fileId,
+      chunkIndex: String(args.chunkIndex),
+      chunkMd5: args.chunkMd5,
+      chunkSize: String(args.chunkSize),
+    });
+    const res = await fetch(`${API_BASE}/upload/chunk?${q}`, {
       method: 'POST',
-      headers: authHeaders(),
-      body: form,
+      headers: {
+        ...authHeaders(),
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(args.blob.size),
+      },
+      body: args.blob,
       signal,
     });
     return parse<ChunkUploadResponse>(res);
+  },
+
+  presignChunks: async (fileId: string, indices: number[]): Promise<Record<string, string>> => {
+    const q = new URLSearchParams({ indices: indices.join(',') });
+    const res = await fetch(`${API_BASE}/upload/presign/${fileId}?${q}`, { headers: authHeaders() });
+    return parse<Record<string, string>>(res);
+  },
+
+  confirmChunk: async (
+    fileId: string,
+    chunkIndex: number,
+    chunkMd5: string,
+  ): Promise<ChunkUploadResponse> => {
+    const q = new URLSearchParams({ fileId, chunkIndex: String(chunkIndex), chunkMd5 });
+    const res = await fetch(`${API_BASE}/upload/confirm?${q}`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    return parse<ChunkUploadResponse>(res);
+  },
+
+  dedupChunks: async (fileId: string, chunkMd5Map: Record<number, string>): Promise<number[]> => {
+    const res = await fetch(`${API_BASE}/upload/dedup/${fileId}`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(chunkMd5Map),
+    });
+    return parse<number[]>(res);
   },
 
   mergeUpload: async (fileId: string): Promise<MergeResult> => {

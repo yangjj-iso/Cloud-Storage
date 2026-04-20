@@ -7,9 +7,12 @@ import com.cloudchunk.common.enums.FileStatus;
 import com.cloudchunk.common.enums.TranscodeStatus;
 import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
+import com.cloudchunk.core.CloudchunkProperties;
 import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.mapper.FileMetaMapper;
 import com.cloudchunk.infra.redis.RedisService;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,16 +28,42 @@ public class FileMetaService {
 
     private final FileMetaMapper mapper;
     private final RedisService redis;
+    private final Cache<String, FileMeta> localCache;
 
-    public FileMetaService(FileMetaMapper mapper, RedisService redis) {
+    public FileMetaService(FileMetaMapper mapper, RedisService redis, CloudchunkProperties props) {
         this.mapper = mapper;
         this.redis = redis;
+        CloudchunkProperties.Cache c = props.getCache();
+        if (c.isFileMetaEnabled()) {
+            this.localCache = Caffeine.newBuilder()
+                    .maximumSize(c.getFileMetaMaxSize())
+                    .expireAfterWrite(c.getFileMetaTtl())
+                    .recordStats()
+                    .build();
+            log.info("FileMeta Caffeine cache enabled: maxSize={}, ttl={}",
+                    c.getFileMetaMaxSize(), c.getFileMetaTtl());
+        } else {
+            this.localCache = null;
+            log.info("FileMeta Caffeine cache disabled");
+        }
     }
 
     public Optional<FileMeta> findById(String fileId) {
+        if (localCache != null) {
+            FileMeta cached = localCache.getIfPresent(fileId);
+            if (cached != null) return Optional.of(cached);
+        }
         FileMeta m = mapper.selectOne(new LambdaQueryWrapper<FileMeta>()
                 .eq(FileMeta::getFileId, fileId));
+        if (m != null && localCache != null) {
+            localCache.put(fileId, m);
+        }
         return Optional.ofNullable(m);
+    }
+
+    /** 暴露 Caffeine 缓存统计（Micrometer 可采集） */
+    public Cache<String, FileMeta> getLocalCache() {
+        return localCache;
     }
 
     public FileMeta getOrThrow(String fileId) {
@@ -131,6 +160,7 @@ public class FileMetaService {
     }
 
     private void invalidateCache(String fileId) {
+        if (localCache != null) localCache.invalidate(fileId);
         try {
             redis.delete(RedisKeys.fileMeta(fileId));
             redis.delete(RedisKeys.fileUrl(fileId));

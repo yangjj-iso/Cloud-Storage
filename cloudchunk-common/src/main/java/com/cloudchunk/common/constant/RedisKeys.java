@@ -29,8 +29,11 @@ public final class RedisKeys {
     /** 转码已完成幂等 */
     public static final String TRANSCODE_DONE = "cc:transcode:done:%s:%s";
 
-    /** 上传限流 */
+    /** 上传限流（令牌桶，per-user） */
     public static final String RATE_UPLOAD = "cc:rate:upload:%s";
+
+    /** 下载限流（令牌桶，per-user） */
+    public static final String RATE_DOWNLOAD = "cc:rate:download:%s";
 
     public static String uploadProgress(String fileId) {
         return String.format(UPLOAD_PROGRESS, fileId);
@@ -70,6 +73,10 @@ public final class RedisKeys {
 
     public static String rateUpload(long userId) {
         return String.format(RATE_UPLOAD, userId);
+    }
+
+    public static String rateDownload(long userId) {
+        return String.format(RATE_DOWNLOAD, userId);
     }
 
     private RedisKeys() {}

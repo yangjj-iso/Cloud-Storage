@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,35 +61,71 @@ public class FileController {
                 "expireInSeconds", u.ttl() == null ? ttlSeconds : u.ttl().toSeconds()));
     }
 
+    /**
+     * 文件下载端点。
+     *
+     * <p>性能优化点（面试加分项）：</p>
+     * <ol>
+     *   <li><b>ETag / If-None-Match → 304</b>：用 fileMd5 做弱 ETag；命中时零流量返回。</li>
+     *   <li><b>Cache-Control</b>：private + max-age，减少后续预览/缩略图重复请求。</li>
+     *   <li><b>StreamingResponseBody</b>：Servlet 线程先释放，写操作交给异步 IO 线程，
+     *       配合虚拟线程降低"长下载占住线程"的问题。</li>
+     *   <li><b>256KB 缓冲区</b>：减少系统调用次数（默认 8KB 的 transferTo 太小）。</li>
+     *   <li><b>Range 支持</b>：206 Partial Content，浏览器 / 下载管理器可多线程拉取。</li>
+     * </ol>
+     */
     @GetMapping("/{fileId}/download")
-    public void download(@PathVariable String fileId,
-                         @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
-                         HttpServletResponse response) throws IOException {
+    public ResponseEntity<StreamingResponseBody> download(
+            @PathVariable String fileId,
+            @RequestHeader(value = HttpHeaders.RANGE, required = false) String range,
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
+
+        // --- meta lookup (later will hit Caffeine cache) ---
+        FileMeta meta = fileMetaService.getAvailableOrThrow(fileId);
+
+        // --- ETag 304 ---
+        String etag = "\"" + meta.getFileMd5() + "\"";
+        if (etag.equals(ifNoneMatch)) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
+                    .eTag(etag)
+                    .build();
+        }
 
         DownloadService.DownloadStream ds = downloadService.open(fileId, range);
-        FileMeta meta = ds.meta();
         long length = ds.end() - ds.start() + 1;
+        String contentType = meta.getMimeType() == null
+                ? MediaType.APPLICATION_OCTET_STREAM_VALUE : meta.getMimeType();
+        String disposition = "attachment; filename*=UTF-8''"
+                + URLEncoder.encode(meta.getFileName(), StandardCharsets.UTF_8);
 
-        response.setStatus(ds.full() ? HttpStatus.OK.value() : HttpStatus.PARTIAL_CONTENT.value());
-        response.setHeader(HttpHeaders.ACCEPT_RANGES, "bytes");
-        response.setHeader(HttpHeaders.CONTENT_LENGTH, String.valueOf(length));
-        response.setHeader(HttpHeaders.CONTENT_TYPE,
-                meta.getMimeType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : meta.getMimeType());
-        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename*=UTF-8''" + URLEncoder.encode(meta.getFileName(), StandardCharsets.UTF_8));
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.ACCEPT_RANGES, "bytes");
+        headers.set(HttpHeaders.CONTENT_LENGTH, String.valueOf(length));
+        headers.set(HttpHeaders.CONTENT_TYPE, contentType);
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, disposition);
+        headers.set(HttpHeaders.ETAG, etag);
+        headers.set(HttpHeaders.CACHE_CONTROL, "private, max-age=600");
         if (!ds.full()) {
-            response.setHeader(HttpHeaders.CONTENT_RANGE,
+            headers.set(HttpHeaders.CONTENT_RANGE,
                     "bytes " + ds.start() + "-" + ds.end() + "/" + ds.total());
         }
 
-        try (InputStream in = ds.stream(); OutputStream out = response.getOutputStream()) {
-            byte[] buf = new byte[64 * 1024];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
+        HttpStatus status = ds.full() ? HttpStatus.OK : HttpStatus.PARTIAL_CONTENT;
+
+        // StreamingResponseBody：写操作可在 Tomcat 异步 IO 线程执行，
+        // 不阻塞 Servlet handler 线程（虚拟线程已大幅缓解，但释放越早越好）。
+        StreamingResponseBody body = outputStream -> {
+            try (InputStream in = ds.stream()) {
+                byte[] buf = new byte[256 * 1024]; // 256KB buffer
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    outputStream.write(buf, 0, n);
+                }
+                outputStream.flush();
             }
-            out.flush();
-        }
+        };
+
+        return new ResponseEntity<>(body, headers, status);
     }
 
     @DeleteMapping("/{fileId}")

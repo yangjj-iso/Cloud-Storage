@@ -203,6 +203,22 @@ public class MinioStorageStrategy implements StorageStrategy {
     }
 
     @Override
+    public void copy(String srcBucket, String srcKey, String dstBucket, String dstKey) {
+        try {
+            client.copyObject(io.minio.CopyObjectArgs.builder()
+                    .bucket(dstBucket)
+                    .object(dstKey)
+                    .source(io.minio.CopySource.builder()
+                            .bucket(srcBucket)
+                            .object(srcKey)
+                            .build())
+                    .build());
+        } catch (Exception e) {
+            throw new StorageException("copy failed: " + srcKey + " → " + dstKey, e);
+        }
+    }
+
+    @Override
     public void delete(String bucket, String objectKey) {
         try {
             client.removeObject(RemoveObjectArgs.builder()
