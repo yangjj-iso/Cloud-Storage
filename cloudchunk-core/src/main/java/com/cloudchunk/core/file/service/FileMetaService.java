@@ -122,6 +122,14 @@ public class FileMetaService {
         }
     }
 
+    public Duration getCachedUrlTtl(String fileId) {
+        try {
+            return redis.getExpire(RedisKeys.fileUrl(fileId));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void invalidateCache(String fileId) {
         try {
             redis.delete(RedisKeys.fileMeta(fileId));

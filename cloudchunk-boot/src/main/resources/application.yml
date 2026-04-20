@@ -21,7 +21,7 @@ spring:
       max-request-size: 130MB
       file-size-threshold: 2MB
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:cloudchunk}?useSSL=false&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3308}/${MYSQL_DB:cloudchunk}?useSSL=false&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:root}
     hikari:
@@ -31,7 +31,7 @@ spring:
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
-      port: ${REDIS_PORT:6379}
+      port: ${REDIS_PORT:6380}
       timeout: 2s
       lettuce:
         pool:
@@ -69,7 +69,7 @@ cloudchunk:
     presign-ttl: PT30M
     compose-batch-size: 1000
     minio:
-      endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+      endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9002}
       access-key: ${MINIO_AK:minioadmin}
       secret-key: ${MINIO_SK:minioadmin}
       region: cn-east-1

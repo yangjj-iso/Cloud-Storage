@@ -31,7 +31,8 @@ public class DownloadService {
         FileMeta meta = fileMetaService.getAvailableOrThrow(fileId);
         String cached = fileMetaService.getCachedUrl(fileId);
         if (cached != null && !cached.isBlank()) {
-            return new PresignedUrl(cached, null);
+            Duration remaining = fileMetaService.getCachedUrlTtl(fileId);
+            return new PresignedUrl(cached, remaining);
         }
         StorageStrategy storage = storageFactory.current();
         String url = storage.presignDownload(meta.getBucket(), meta.getObjectKey(), ttl);
@@ -55,8 +56,8 @@ public class DownloadService {
             InputStream in = storage.get(new GetRequest(meta.getBucket(), meta.getObjectKey()));
             return new DownloadStream(meta, in, 0, total - 1, total, true);
         }
-        RangeStream rs = storage.getRange(new GetRangeRequest(
-                meta.getBucket(), meta.getObjectKey(), spec.start(), spec.end()));
+        RangeStream rs = storage.getRange(GetRangeRequest.of(
+                meta.getBucket(), meta.getObjectKey(), spec.start(), spec.end(), total));
         return new DownloadStream(meta, rs.stream(), rs.start(), rs.end(), rs.total(), false);
     }
 

@@ -12,6 +12,7 @@ import {
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
 import { api, downloadUrl } from '../lib/api';
+import { downloadFile, type DownloadProgress } from '../lib/download';
 import type { FileMeta, TranscodeStatusResp } from '../types';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
@@ -27,6 +28,7 @@ export function FileDrawer() {
   const [url, setUrl] = useState<string>('');
   const [transcode, setTranscode] = useState<TranscodeStatusResp | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dlProgress, setDlProgress] = useState<DownloadProgress | null>(null);
 
   useEffect(() => {
     if (!fileId) {
@@ -55,6 +57,24 @@ export function FileDrawer() {
       cancelled = true;
     };
   }, [fileId]);
+
+  const onDownload = async () => {
+    if (!meta || !url) {
+      window.open(url || downloadUrl(fileId!), '_blank');
+      return;
+    }
+    setDlProgress({ loaded: 0, total: meta.fileSize, percent: 0 });
+    try {
+      await downloadFile({
+        url,
+        fileName: meta.fileName,
+        fileSize: meta.fileSize,
+        onProgress: setDlProgress,
+      });
+    } finally {
+      setDlProgress(null);
+    }
+  };
 
   const onRetryTranscode = async () => {
     if (!fileId) return;
@@ -260,10 +280,11 @@ export function FileDrawer() {
             <Button
               size="sm"
               variant="primary"
-              leftIcon={<Download className="h-3.5 w-3.5" />}
-              onClick={() => window.open(url || downloadUrl(fileId), '_blank')}
+              leftIcon={dlProgress ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              onClick={onDownload}
+              disabled={!!dlProgress}
             >
-              下载
+              {dlProgress ? `${dlProgress.percent}%` : '下载'}
             </Button>
           </div>
         </div>

@@ -100,9 +100,9 @@ public class MinioStorageStrategy implements StorageStrategy {
     @Override
     public RangeStream getRange(GetRangeRequest req) {
         try {
-            StatObjectResponse stat = client.statObject(StatObjectArgs.builder()
-                    .bucket(req.bucket()).object(req.objectKey()).build());
-            long total = stat.size();
+            long total = req.totalSize() > 0 ? req.totalSize()
+                    : client.statObject(StatObjectArgs.builder()
+                            .bucket(req.bucket()).object(req.objectKey()).build()).size();
             long end = req.end() < 0 ? total - 1 : Math.min(req.end(), total - 1);
             long length = end - req.start() + 1;
             InputStream in = client.getObject(GetObjectArgs.builder()

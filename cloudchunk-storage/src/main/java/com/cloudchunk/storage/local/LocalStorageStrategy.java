@@ -102,7 +102,7 @@ public class LocalStorageStrategy implements StorageStrategy {
             throw new StorageException(ErrorCode.FILE_NOT_FOUND, req.objectKey());
         }
         try {
-            long total = Files.size(p);
+            long total = req.totalSize() > 0 ? req.totalSize() : Files.size(p);
             long end = req.end() < 0 ? total - 1 : Math.min(req.end(), total - 1);
             long length = end - req.start() + 1;
             RandomAccessFile raf = new RandomAccessFile(p.toFile(), "r");

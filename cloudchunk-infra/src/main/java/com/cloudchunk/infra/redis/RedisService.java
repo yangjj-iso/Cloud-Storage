@@ -52,6 +52,12 @@ public class RedisService {
         return redis.expire(key, ttl);
     }
 
+    public Duration getExpire(String key) {
+        Long seconds = redis.getExpire(key, java.util.concurrent.TimeUnit.SECONDS);
+        if (seconds == null || seconds < 0) return null;
+        return Duration.ofSeconds(seconds);
+    }
+
     /* ---------- Hash ---------- */
 
     public void hSet(String key, String field, String value) {

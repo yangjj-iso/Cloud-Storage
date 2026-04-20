@@ -28,7 +28,7 @@ services:
       - mysql-data:/var/lib/mysql
       - ./sql:/docker-entrypoint-initdb.d
     ports:
-      - "3306:3306"
+      - "3308:3306"
     networks: [cloudchunk-net]
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
@@ -108,8 +108,8 @@ services:
     volumes:
       - minio-data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9002:9000"
+      - "9003:9001"
     networks: [cloudchunk-net]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
