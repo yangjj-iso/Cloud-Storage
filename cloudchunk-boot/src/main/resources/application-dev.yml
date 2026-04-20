@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+
+logging:
+  level:
+    com.cloudchunk: DEBUG
+    org.mybatis: WARN
+
+cloudchunk:
+  storage:
+    type: ${STORAGE_TYPE:minio}

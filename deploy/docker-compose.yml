@@ -1,0 +1,120 @@
+version: "3.9"
+name: cloudchunk
+
+networks:
+  cloudchunk-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:
+  rmq-store:
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: cc-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: cloudchunk
+      TZ: Asia/Shanghai
+    command:
+      - "--default-authentication-plugin=mysql_native_password"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d
+    ports:
+      - "3306:3306"
+    networks: [cloudchunk-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # 宿主机 6379 可能被别的 Redis 占用；此处暴露到 6380。
+  redis:
+    image: redis:7-alpine
+    container_name: cc-redis
+    restart: unless-stopped
+    command: ["redis-server", "/etc/redis/redis.conf"]
+    volumes:
+      - redis-data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+    ports:
+      - "6380:6379"
+    networks: [cloudchunk-net]
+
+  rmq-namesrv:
+    image: apache/rocketmq:5.2.0
+    container_name: cc-rmq-namesrv
+    restart: unless-stopped
+    command: sh mqnamesrv
+    ports:
+      - "9876:9876"
+    environment:
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m -Xmn256m"
+    networks: [cloudchunk-net]
+
+  rmq-broker:
+    image: apache/rocketmq:5.2.0
+    container_name: cc-rmq-broker
+    restart: unless-stopped
+    depends_on:
+      - rmq-namesrv
+    # 命名 volume 默认属主是 root，而镜像运行用户 rocketmq(3000) 无写权限。
+    # 以 root 启动并在入口前 chown，再手动 drop 到 rocketmq。
+    user: "0:0"
+    entrypoint: ["sh","-c"]
+    command:
+      - |
+        mkdir -p /home/rocketmq/store &&
+        chown -R 3000:3000 /home/rocketmq/store &&
+        su -s /bin/sh rocketmq -c "sh mqbroker -n cc-rmq-namesrv:9876 -c /home/rocketmq/rocketmq-5.2.0/conf/broker.conf"
+    volumes:
+      - ./rocketmq/broker.conf:/home/rocketmq/rocketmq-5.2.0/conf/broker.conf:ro
+      - rmq-store:/home/rocketmq/store
+    environment:
+      JAVA_OPT_EXT: "-Xms1g -Xmx1g -Xmn512m"
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+    networks: [cloudchunk-net]
+
+  rmq-dashboard:
+    image: apacherocketmq/rocketmq-dashboard:latest
+    container_name: cc-rmq-dashboard
+    restart: unless-stopped
+    depends_on:
+      - rmq-namesrv
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=cc-rmq-namesrv:9876 -Dserver.port=8080"
+    ports:
+      - "8180:8080"
+    networks: [cloudchunk-net]
+
+  minio:
+    image: minio/minio:latest
+    container_name: cc-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks: [cloudchunk-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # minio-init removed: MinioStorageStrategy auto-creates the bucket on startup.

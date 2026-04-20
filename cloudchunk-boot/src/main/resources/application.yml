@@ -1,0 +1,114 @@
+server:
+  port: 8080
+  compression:
+    enabled: true
+  forward-headers-strategy: native
+  tomcat:
+    max-swallow-size: -1
+
+spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  application:
+    name: cloudchunk
+  threads:
+    virtual:
+      enabled: true
+  servlet:
+    multipart:
+      # 需要大于 cloudchunk.chunk.max-size（默认 100MB）再留一点 multipart 边角
+      max-file-size: 120MB
+      max-request-size: 130MB
+      file-size-threshold: 2MB
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:cloudchunk}?useSSL=false&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+      connection-timeout: 3000
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  global-config:
+    db-config:
+      id-type: auto
+  configuration:
+    map-underscore-to-camel-case: true
+
+rocketmq:
+  name-server: ${RMQ_NAMESRV:127.0.0.1:9876}
+  producer:
+    group: PG-cloudchunk
+    send-message-timeout: 3000
+    retry-times-when-send-failed: 2
+
+cloudchunk:
+  chunk:
+    default-size: 5242880
+    min-size: 1048576
+    max-size: 104857600
+    session-ttl: PT24H
+  upload:
+    md5-verify-thread-pool: 4
+    auto-merge: true
+  storage:
+    type: ${STORAGE_TYPE:minio}
+    default-bucket: ${STORAGE_BUCKET:cloudchunk}
+    presign-ttl: PT30M
+    compose-batch-size: 1000
+    minio:
+      endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+      access-key: ${MINIO_AK:minioadmin}
+      secret-key: ${MINIO_SK:minioadmin}
+      region: cn-east-1
+      secure: false
+    local:
+      root: ${LOCAL_ROOT:./local-storage}
+      base-url: ${LOCAL_BASE_URL:http://localhost:8080/api/v1/file}
+  transcode:
+    ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
+    video-task-timeout: PT30M
+    video-max-duration-seconds: 7200
+    image:
+      sizes:
+        - 200
+        - 600
+        - 1200
+      quality: 0.85
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+  packages-to-scan: com.cloudchunk.api.controller
+
+logging:
+  level:
+    root: INFO
+    com.cloudchunk: INFO
+    org.apache.rocketmq: WARN
+    io.minio: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%X{traceId:--}] [%thread] %-5level %logger{36} - %msg%n"

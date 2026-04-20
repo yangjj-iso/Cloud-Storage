@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cloudchunk.core.quota.mapper.UserQuotaMapper">
+
+    <update id="addUsed">
+        UPDATE user_quota
+        SET used_bytes = used_bytes + #{bytes},
+            file_count = file_count + 1
+        WHERE user_id = #{userId}
+    </update>
+
+    <update id="subUsed">
+        UPDATE user_quota
+        SET used_bytes = GREATEST(used_bytes - #{bytes}, 0),
+            file_count = GREATEST(file_count - 1, 0)
+        WHERE user_id = #{userId}
+    </update>
+
+</mapper>

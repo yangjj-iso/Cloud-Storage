@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cloudchunk.core.upload.mapper.ChunkRecordMapper">
+
+    <insert id="upsert">
+        INSERT INTO chunk_record (file_id, chunk_index, chunk_md5, chunk_size, etag, status, created_at, updated_at)
+        VALUES (#{r.fileId}, #{r.chunkIndex}, #{r.chunkMd5}, #{r.chunkSize}, #{r.etag},
+                #{r.status.code}, NOW(3), NOW(3))
+        ON DUPLICATE KEY UPDATE
+            chunk_md5  = VALUES(chunk_md5),
+            chunk_size = VALUES(chunk_size),
+            etag       = VALUES(etag),
+            status     = VALUES(status),
+            updated_at = NOW(3)
+    </insert>
+
+</mapper>

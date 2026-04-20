@@ -1,0 +1,2 @@
+# Configurations are picked up via @ComponentScan("com.cloudchunk") in cloudchunk-boot.
+# Kept empty to reserve the standard Spring Boot starter location.
