@@ -138,6 +138,8 @@ npm run dev
 | [10 开发与联调](./docs/10-development-guide.md) | 本地后端、前端、依赖服务启动流程 |
 | [11 配置参考](./docs/11-configuration-reference.md) | 环境变量、应用配置、Redis Key、MQ Topic |
 | [12 常见问题排障](./docs/12-troubleshooting.md) | 启动、上传、下载、转码问题定位 |
+| [13 安全设计](./docs/13-security.md) | 鉴权、授权、资源隔离、防护机制 |
+| [14 容错与弹性](./docs/14-resilience.md) | 重试、Watchdog 续期、过期清理、可观测性 |
 | [面试资料索引](./docs/interview/README.md) | 项目面试讲解稿与全链路模拟 |
 
 ---
