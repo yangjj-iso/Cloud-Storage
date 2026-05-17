@@ -15,7 +15,7 @@
 
 **CloudChunk** 是一个面向企业级文件管理场景的分布式文件存储服务，对接 MinIO 对象存储，提供以下核心能力：
 
-- **大文件分片上传**：前端 5MB 切片 + 每片 MD5 校验，支持 GB 级文件稳定上传
+- **大文件分片上传**：前端按文件大小动态切片（默认 10 MB）+ 每片 MD5 校验，支持 GB 级文件稳定上传
 - **断点续传**：Redis 记录分片进度，网络中断/刷新页面后可从断点恢复，成功率 > 99%
 - **文件秒传**：基于整文件 MD5 去重，命中率约 35%，节省存储与带宽
 - **异步转码管道**：RocketMQ 解耦上传与转码，上传接口 TP99 不受转码耗时影响
@@ -80,29 +80,44 @@
 ### 环境要求
 - JDK 21+
 - Maven 3.9+
+- Node.js 20+ / npm 10+
 - Docker / Docker Compose
 
 ### 启动依赖
 ```bash
-docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env.example up -d
 ```
 包含：MySQL 8.0、Redis 7、RocketMQ 5、MinIO
 
 ### 初始化数据库
-```bash
-mysql -h 127.0.0.1 -uroot -p cloudchunk < deploy/sql/schema.sql
-```
+首次启动 `deploy/docker-compose.yml` 时，MySQL 容器会自动执行 `deploy/sql/schema.sql`。如果已经存在旧数据卷，需要手动执行 SQL 或使用 `docker compose -f deploy/docker-compose.yml down -v` 重建环境。
 
 ### 运行服务
+```bash
+mvn -pl cloudchunk-boot -am spring-boot:run -Dspring-boot.run.profiles=dev
+```
+
+或打包运行：
+
 ```bash
 mvn clean package -DskipTests
 java -jar cloudchunk-boot/target/cloudchunk-boot.jar --spring.profiles.active=dev
 ```
 
+### 运行前端
+```bash
+cd cloudchunk-web
+npm ci
+npm run dev
+```
+
 ### 访问
 - API: `http://localhost:8080/api/v1`
 - 健康检查: `http://localhost:8080/actuator/health`
-- MinIO 控制台: `http://localhost:9001`  (`minioadmin / minioadmin`)
+- 前端: `http://localhost:5173`
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- RocketMQ Dashboard: `http://localhost:8180`
+- MinIO 控制台: `http://localhost:9003`  (`minioadmin / minioadmin`)
 
 ---
 
@@ -110,6 +125,7 @@ java -jar cloudchunk-boot/target/cloudchunk-boot.jar --spring.profiles.active=de
 
 | 文档 | 说明 |
 |------|------|
+| [文档中心](./docs/README.md) | 文档总入口、推荐阅读路径 |
 | [01 架构设计](./docs/01-architecture.md) | 整体架构图、模块拆分、部署拓扑 |
 | [02 数据库设计](./docs/02-database-design.md) | MySQL 表结构、Redis Key、索引 |
 | [03 API 设计](./docs/03-api-design.md) | RESTful 接口清单、错误码 |
@@ -118,6 +134,11 @@ java -jar cloudchunk-boot/target/cloudchunk-boot.jar --spring.profiles.active=de
 | [06 异步转码](./docs/06-async-transcoding.md) | RocketMQ 管道、消费者、重试 |
 | [07 部署运维](./docs/07-deployment.md) | 环境依赖、docker-compose、监控 |
 | [08 工程结构](./docs/08-project-structure.md) | Maven 多模块、包结构规范 |
+| [09 性能优化](./docs/09-performance.md) | 上传 / 下载热路径优化、缓存、限流 |
+| [10 开发与联调](./docs/10-development-guide.md) | 本地后端、前端、依赖服务启动流程 |
+| [11 配置参考](./docs/11-configuration-reference.md) | 环境变量、应用配置、Redis Key、MQ Topic |
+| [12 常见问题排障](./docs/12-troubleshooting.md) | 启动、上传、下载、转码问题定位 |
+| [面试资料索引](./docs/interview/README.md) | 项目面试讲解稿与全链路模拟 |
 
 ---
 
@@ -126,7 +147,7 @@ java -jar cloudchunk-boot/target/cloudchunk-boot.jar --spring.profiles.active=de
 | 指标 | 目标值 |
 |------|--------|
 | 单文件上传上限 | 50 GB |
-| 分片大小 | 5 MB（可配置 1~100 MB） |
+| 分片大小 | 默认 10 MB（当前配置 1~200 MB，建议不低于 5 MB） |
 | 上传接口 TP99 | ≤ 200 ms（不含分片传输耗时） |
 | 断点续传成功率 | > 99% |
 | 秒传命中率 | ≈ 35% |
@@ -138,11 +159,12 @@ java -jar cloudchunk-boot/target/cloudchunk-boot.jar --spring.profiles.active=de
 ## 项目状态
 
 - [x] 架构设计文档
-- [ ] 核心模块开发
-- [ ] 分片上传 / 断点续传 / 秒传
-- [ ] 异步转码管道
-- [ ] 存储策略实现
-- [ ] 前端 Demo
+- [x] 核心模块开发
+- [x] 分片上传 / 断点续传 / 秒传
+- [x] 异步校验 / 转码管道
+- [x] MinIO / 本地存储策略
+- [x] 前端 Demo
+- [x] 本地 docker-compose 依赖环境
 - [ ] CI / CD
 
 ---

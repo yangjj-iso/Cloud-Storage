@@ -96,7 +96,7 @@ sequenceDiagram
 ### 3.1 前端切片算法
 
 ```text
-chunkSize   = 5 MB (默认，可配置 1~100 MB)
+chunkSize   = 10 MB (当前默认，可配置 1~200 MB；建议不低于 5 MB)
 chunkTotal  = ceil(fileSize / chunkSize)
 for i in [0, chunkTotal):
     chunk   = file.slice(i * chunkSize, (i+1) * chunkSize)
@@ -293,7 +293,7 @@ sequenceDiagram
 ### 5.3 MinIO Compose Object 细节
 
 - MinIO SDK：`ComposeObjectArgs` 支持最多 **10,000** 个源对象
-- 每个源对象 **最小 5 MB**（最后一个除外）—— 这正是前端选 5 MB 切片的原因
+- 每个源对象 **最小 5 MB**（最后一个除外），因此分片配置建议不低于 5 MB；当前开发配置默认 10 MB
 - 超过 10,000 分片 → **分批 Compose**：先拼合成中间对象，再二次拼合
 - Java SDK 示例：
 
@@ -433,7 +433,7 @@ sequenceDiagram
 | 优化点 | 说明 |
 |--------|------|
 | **分片并发度 4~6** | 经验值，避免浏览器连接上限 6/domain 被吃满 |
-| **分片大小 5 MB** | MinIO Compose 最小分片约束；过小会放大元数据开销 |
+| **分片大小默认 10 MB** | 满足 MinIO Compose 非末尾源对象最小 5 MB 约束；过小会放大元数据开销 |
 | **虚拟线程** | 上传接口 I/O 密集，Java 21 Virtual Thread 显著降内存 |
 | **Redis pipeline** | 合并前 `HGETALL` + 后续 `DEL` 合并一次 RTT |
 | **MySQL batch insert** | `chunk_record` 批量写（合并前兜底落表） |
