@@ -1,69 +1,24 @@
 # CloudChunk 文档中心
 
-> 这里是 CloudChunk 的工程文档入口，按“先跑起来、再理解架构、最后深入链路”的顺序组织。
+## 学习路径
 
-## 快速入口
+建议按以下顺序阅读，从全局到细节逐步深入：
 
-| 场景 | 推荐阅读 |
-|------|----------|
-| 第一次运行项目 | [10 开发与联调指南](./10-development-guide.md) |
-| 配置本地 / 测试 / 生产环境 | [11 配置参考](./11-configuration-reference.md) |
-| 服务启动失败或上传下载异常 | [12 常见问题排障](./12-troubleshooting.md) |
-| 理解整体架构 | [01 架构设计](./01-architecture.md) |
-| 对外接口对接 | [03 API 设计](./03-api-design.md) |
-| 准备面试讲解 | [interview 面试资料索引](./interview/README.md) |
+| 顺序 | 文档 | 内容 | 预计阅读时间 |
+|------|------|------|-------------|
+| 1 | [00-整体架构](./00-architecture.md) | 系统架构图、模块依赖、核心数据流总表 | 5 分钟 |
+| 2 | [01-分片上传](./01-upload-flow.md) | 前端 MD5 → init → chunk → Lua 进度 → merge 全链路 | 15 分钟 |
+| 3 | [02-秒传与断点续传](./02-instant-resume-flow.md) | MD5 去重、引用计数、三级可靠性、分片级去重 | 10 分钟 |
+| 4 | [03-异步校验与转码](./03-checksum-transcode-flow.md) | RocketMQ 管道、模板方法模式、DLQ 兜底、补偿扫描 | 12 分钟 |
+| 5 | [04-下载与缓存](./04-download-flow.md) | 预签名 URL、Range 分段、Caffeine+Redis 两级缓存、Pub/Sub 一致性 | 10 分钟 |
+| 6 | [05-限流与清理](./05-ratelimit-cleanup-flow.md) | Redis Lua 令牌桶、僵尸分片清理、存储策略模式 | 10 分钟 |
 
-## 主线文档
+## 面试准备
 
-| 序号 | 文档 | 说明 |
-|------|------|------|
-| 01 | [架构设计](./01-architecture.md) | 整体架构、模块拆分、部署拓扑、演进方向 |
-| 02 | [数据库与缓存设计](./02-database-design.md) | MySQL 表结构、Redis Key、索引与一致性模型 |
-| 03 | [API 设计](./03-api-design.md) | REST 接口、统一响应、错误码、OpenAPI |
-| 04 | [分片上传协议](./04-chunk-upload-protocol.md) | 秒传、分片上传、断点续传、合并、异步校验 |
-| 05 | [存储策略](./05-storage-strategy.md) | MinIO / 本地磁盘 / OSS 的策略模式抽象 |
-| 06 | [异步转码管道](./06-async-transcoding.md) | RocketMQ Topic/Tag、图片/视频/文档消费者、重试 |
-| 07 | [部署与运维](./07-deployment.md) | docker-compose、本地端口、监控、容量规划 |
-| 08 | [工程结构与命名规范](./08-project-structure.md) | Maven 多模块、包结构、编码与 Git 规范 |
-| 09 | [性能优化与并发设计](./09-performance.md) | 虚拟线程背压、Redis Lua、缓存、Range 下载 |
-| 10 | [开发与联调指南](./10-development-guide.md) | 后端、前端、依赖服务的本地启动流程 |
-| 11 | [配置参考](./11-configuration-reference.md) | 环境变量、应用配置项、Topic、Redis Key |
-| 12 | [常见问题排障](./12-troubleshooting.md) | 启动、依赖、上传、下载、转码的排查路径 |
+每篇文档都包含 **面试要点** 段落，标注了常见面试提问及推荐回答思路。重点关注：
 
-## 资料补充
-
-| 目录 / 文件 | 说明 |
-|-------------|------|
-| [interview/](./interview/README.md) | 按模块拆分的项目面试讲解稿 |
-| [images/](./images/) | 文档与示例文章用到的 GIF / 图片资源 |
-| [纯小白如何在 GitHub 上贡献代码](./blog-纯小白如何在GitHub上贡献代码.md) | 面向新手的 GitHub 贡献流程文章 |
-
-## 推荐阅读路径
-
-### 开发者
-
-1. [10 开发与联调指南](./10-development-guide.md)
-2. [03 API 设计](./03-api-design.md)
-3. [04 分片上传协议](./04-chunk-upload-protocol.md)
-4. [08 工程结构与命名规范](./08-project-structure.md)
-
-### 运维 / 部署
-
-1. [07 部署与运维](./07-deployment.md)
-2. [11 配置参考](./11-configuration-reference.md)
-3. [12 常见问题排障](./12-troubleshooting.md)
-4. [09 性能优化与并发设计](./09-performance.md)
-
-### 面试复盘
-
-1. [01 项目概览与架构](./interview/01-项目概览与架构.md)
-2. [03 分片上传](./interview/03-分片上传.md)
-3. [06 服务端合并](./interview/06-服务端合并.md)
-4. [13 面试全链路模拟](./interview/13-面试全链路模拟.md)
-
-## 文档维护约定
-
-- 文档中的端口、环境变量、接口路径应以代码和 `deploy/docker-compose.yml` 为准。
-- 新增后端配置时，同步更新 [11 配置参考](./11-configuration-reference.md)。
-- 新增接口时，同步更新 [03 API 设计](./03-api-design.md) 或在后续版本中补充 OpenAPI 示例。
-- 修改部署脚本时，同步更新 [07 部署与运维](./07-deployment.md) 与 [12 常见问题排障](./12-troubleshooting.md)。
+- **01** 中的"去 @Transactional 设计"和"Lua 原子进度"
+- **02** 中的"三级可靠性"和"Redis 锁防并发"
+- **03** 中的"模板方法模式"和"三层失败防护"
+- **04** 中的"两级缓存 + Pub/Sub 一致性"和"CAP 分析"
+- **05** 中的"令牌桶 vs 漏桶"和"策略模式 / OCP 原则"

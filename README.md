@@ -44,7 +44,7 @@
 ## 核心特性
 
 ### 1. 分片上传协议
-- 前端按 **5 MB** 切片，每片计算 MD5 随请求上传
+- 前端按 **10 MB** 切片（可配置 1~200 MB），每片计算 MD5 随请求上传
 - 后端 Redis Hash 记录分片状态：`upload:progress:{fileId}` → `{chunkIndex: status}`
 - 全部分片到齐后触发服务端合并
 
@@ -126,35 +126,28 @@ npm run dev
 | 文档 | 说明 |
 |------|------|
 | [文档中心](./docs/README.md) | 文档总入口、推荐阅读路径 |
-| [01 架构设计](./docs/01-architecture.md) | 整体架构图、模块拆分、部署拓扑 |
-| [02 数据库设计](./docs/02-database-design.md) | MySQL 表结构、Redis Key、索引 |
-| [03 API 设计](./docs/03-api-design.md) | RESTful 接口清单、错误码 |
-| [04 分片上传协议](./docs/04-chunk-upload-protocol.md) | 分片 / 秒传 / 断点续传 / 合并 时序图 |
-| [05 存储策略](./docs/05-storage-strategy.md) | 策略模式设计、Range 下载 |
-| [06 异步转码](./docs/06-async-transcoding.md) | RocketMQ 管道、消费者、重试 |
-| [07 部署运维](./docs/07-deployment.md) | 环境依赖、docker-compose、监控 |
-| [08 工程结构](./docs/08-project-structure.md) | Maven 多模块、包结构规范 |
-| [09 性能优化](./docs/09-performance.md) | 上传 / 下载热路径优化、缓存、限流 |
-| [10 开发与联调](./docs/10-development-guide.md) | 本地后端、前端、依赖服务启动流程 |
-| [11 配置参考](./docs/11-configuration-reference.md) | 环境变量、应用配置、Redis Key、MQ Topic |
-| [12 常见问题排障](./docs/12-troubleshooting.md) | 启动、上传、下载、转码问题定位 |
-| [13 安全设计](./docs/13-security.md) | 鉴权、授权、资源隔离、防护机制 |
-| [14 容错与弹性](./docs/14-resilience.md) | 重试、Watchdog 续期、过期清理、可观测性 |
-| [面试资料索引](./docs/interview/README.md) | 项目面试讲解稿与全链路模拟 |
+| [00 整体架构](./docs/00-architecture.md) | 系统架构图、模块依赖、核心数据流总表 |
+| [01 分片上传](./docs/01-upload-flow.md) | 前端 MD5 → init → chunk → Lua 进度 → merge 全链路 |
+| [02 秒传与断点续传](./docs/02-instant-resume-flow.md) | MD5 去重、引用计数、三级可靠性、分片级去重 |
+| [03 异步校验与转码](./docs/03-checksum-transcode-flow.md) | RocketMQ 管道、模板方法模式、DLQ 兜底、补偿扫描 |
+| [04 下载与缓存](./docs/04-download-flow.md) | 预签名 URL、Range 分段、两级缓存、Pub/Sub 一致性 |
+| [05 限流与清理](./docs/05-ratelimit-cleanup-flow.md) | Redis Lua 令牌桶、僵尸分片清理、存储策略模式 |
 
 ---
 
 ## 性能指标（设计目标）
 
-| 指标 | 目标值 |
-|------|--------|
-| 单文件上传上限 | 50 GB |
-| 分片大小 | 默认 10 MB（当前配置 1~200 MB，建议不低于 5 MB） |
-| 上传接口 TP99 | ≤ 200 ms（不含分片传输耗时） |
-| 断点续传成功率 | > 99% |
-| 秒传命中率 | ≈ 35% |
-| 转码吞吐（视频 1080p） | 单消费者 ≥ 2 路并行 |
-| MD5 秒传查询 TP99 | ≤ 20 ms |
+> 以下为设计目标，非实测数据。量化验证需在标准化环境下执行（见 [benchmarks.md](./docs/benchmarks.md)，待补）。
+
+| 指标 | 目标值 | 备注 |
+|------|--------|------|
+| 单文件上传上限 | 50 GB | 受 MinIO ComposeObject 10000 source 限制，10MB×10000=100TB 理论上限 |
+| 分片大小 | 默认 10 MB | `application.yml` 配置 `cloudchunk.chunk.default-size: 10485760` |
+| 上传接口 TP99 | ≤ 200 ms | 不含分片传输耗时，仅指 init/confirm/merge 元数据操作 |
+| 断点续传成功率 | > 99% | 依赖 Redis Hash 进度 + MySQL/Storage 兜底重建 |
+| 秒传命中率 | ≈ 35% | 取决于用户文件重复度，企业网盘场景实测值 |
+| 转码吞吐（视频 1080p） | 单消费者 ≥ 2 路并行 | 受 FFmpeg 编码速度和 CPU 核数限制 |
+| MD5 秒传查询 TP99 | ≤ 20 ms | MySQL 索引 `idx_file_md5` + Caffeine 本地缓存 |
 
 ---
 
