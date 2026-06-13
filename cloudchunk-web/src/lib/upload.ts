@@ -33,6 +33,13 @@ export interface UploadCallbacks {
 }
 
 export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<void> {
+  // 上传主流程：
+  // 1. 浏览器本地计算整文件 MD5 和每个分片 MD5；
+  // 2. 调后端 /upload/init 创建或恢复上传会话；
+  // 3. 优先拿 presigned PUT URL，把分片直接 PUT 到 MinIO；
+  // 4. 直传成功后调 /upload/confirm，让后端记录分片元数据和进度；
+  // 5. 如果直传失败，降级为 /upload/chunk，由后端代理写入 MinIO；
+  // 6. 全部分片完成后调 /upload/merge，把临时分片合成最终对象。
   const { file } = task;
   const abortSignal = task.abortController?.signal;
   const throwIfAborted = () => {
@@ -43,6 +50,8 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
   try {
     // 1. single-pass hash（优先 IndexedDB 缓存命中，跳过整次文件读取）
     cb.onStatus('HASHING', { startedAt: Date.now() });
+    // chunkSize 和 chunkTotal 是前后端共同认可的分片协议。
+    // 后端 init 会再次校验 chunkTotal 是否和 fileSize/chunkSize 匹配。
     const chunkSize = guessChunkSize(file.size);
     const chunkTotal = Math.max(1, Math.ceil(file.size / chunkSize));
     const cacheKey = hashCacheKey(file, chunkSize);
@@ -69,6 +78,8 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     // 2. init
     stage = 'INIT';
     cb.onStatus('INITIATING', { md5, chunkSize, chunkTotal });
+    // init 不上传文件内容，只提交文件名、大小、整文件 MD5、分片大小和分片数量。
+    // 后端会用这些信息判断秒传、续传或创建新 UploadSession。
     const init = await api.initUpload({
       fileName: file.name,
       fileSize: file.size,
@@ -80,11 +91,14 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     throwIfAborted();
 
     if (init.mode === 'INSTANT') {
+      // 秒传命中：后端已经有相同 MD5 的可用文件，前端不用再传任何分片。
       cb.onStatus('DONE', { fileId: init.fileId, mode: 'INSTANT', finishedAt: Date.now() });
       cb.onDone(init.fileId);
       return;
     }
 
+    // UPLOAD 表示全新上传，RESUME 表示复用未完成会话继续上传。
+    // uploaded 是后端确认已经存在的分片集合，前端只需要上传缺失分片。
     const actualChunkSize = init.chunkSize ?? chunkSize;
     const actualChunkTotal = init.chunkTotal ?? chunkTotal;
     const uploaded = new Set<number>(init.uploaded ?? []);
@@ -129,6 +143,8 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     const PRESIGN_BATCH = 50;
     let presignedUrls: Record<string, string> = {};
     let presignFetched = 0;
+    // usePresign=true 代表优先走浏览器 -> MinIO 的直传路径。
+    // 一旦发现预签名上传不可用，后续分片统一降级到浏览器 -> 后端 -> MinIO。
     let usePresign = true; // 首次失败后降级为 backend proxy
 
     async function ensurePresigned(needed: number): Promise<void> {
@@ -166,17 +182,14 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
         try {
           const t0 = Date.now();
           if (presignUrl && usePresign) {
-            // 直传 MinIO：数据不经过后端
             const putRes = await fetch(presignUrl, {
               method: 'PUT',
               body: blob,
               signal: abortSignal,
             });
             if (!putRes.ok) throw new Error(`MinIO PUT ${putRes.status}`);
-            // 回调后端确认（仅元数据，无数据传输）
             await api.confirmChunk(init.fileId, idx, chunkMd5);
           } else {
-            // 降级：通过后端代理上传
             await api.uploadChunk(
               { fileId: init.fileId, chunkIndex: idx, chunkMd5, chunkSize: blob.size, blob },
               abortSignal,
@@ -185,10 +198,10 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
           return Date.now() - t0;
         } catch (e) {
           if ((e as { name?: string }).name === 'AbortError') throw e;
-          // presigned PUT 失败可能是 CORS，降级到 backend proxy 重试
-          if (presignUrl && usePresign && attempt === 0) {
+          if (presignUrl && usePresign) {
             usePresign = false;
             console.warn('[upload] presigned PUT failed, degrading to backend proxy', e);
+            attempt--; // CORS fallback 不消耗重试次数
             continue;
           }
           if (attempt >= MAX_RETRIES) throw e;
@@ -215,6 +228,8 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
           bytesSoFar += Math.min(actualChunkSize, file.size - idx * actualChunkSize);
           const elapsed = (Date.now() - startTs) / 1000;
           const speed = elapsed > 0 ? bytesSoFar / elapsed : 0;
+          // UI 进度按“客户端已完成上传的分片”推进；
+          // 后端最终可信进度仍以 confirmChunk/uploadChunk 写入的 Redis 进度为准。
           cb.onChunkDone(idx, actualChunkSize, speed);
 
           // 每 10 片持久化一次上传进度到 IndexedDB（断电 / 关标签页后可恢复）
@@ -276,6 +291,8 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     // 4. merge (server may have auto-merged already; call is idempotent)
     stage = 'MERGE';
     cb.onStatus('MERGING');
+    // 所有 worker 完成后主动请求合并。
+    // 如果后端 autoMerge 已经先合并成功，这里再次调用会走幂等返回。
     await api.mergeUpload(init.fileId);
     // 上传成功，清除 IndexedDB 持久化状态
     delUploadState(init.fileId).catch(() => {});

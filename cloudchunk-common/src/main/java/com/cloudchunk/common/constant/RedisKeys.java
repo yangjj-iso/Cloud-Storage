@@ -35,6 +35,9 @@ public final class RedisKeys {
     /** 下载限流（令牌桶，per-user） */
     public static final String RATE_DOWNLOAD = "cc:rate:download:%s";
 
+    /** Pub/Sub：file_meta 缓存失效通知 channel */
+    public static final String CHANNEL_CACHE_INVALIDATE = "cc:cache:invalidate:file_meta";
+
     public static String uploadProgress(String fileId) {
         return String.format(UPLOAD_PROGRESS, fileId);
     }

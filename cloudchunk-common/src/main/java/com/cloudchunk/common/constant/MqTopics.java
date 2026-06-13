@@ -20,6 +20,13 @@ public final class MqTopics {
     public static final String CG_CHECKSUM        = "CG-checksum";
     public static final String CG_BROKEN_NOTIFY   = "CG-broken-notify";
 
+    public static final String CG_TRANSCODE_DLQ  = "CG-transcode-dlq";
+
+    /** RocketMQ DLQ topic 命名规则：%DLQ% + 原 ConsumerGroup */
+    public static final String DLQ_TRANSCODE_IMG   = "%DLQ%" + CG_TRANSCODE_IMG;
+    public static final String DLQ_TRANSCODE_VIDEO = "%DLQ%" + CG_TRANSCODE_VIDEO;
+    public static final String DLQ_TRANSCODE_DOC   = "%DLQ%" + CG_TRANSCODE_DOC;
+
     /** 组合 Topic:Tag 表达式 */
     public static String transcodeDestination(String tag) {
         return TRANSCODE + ":" + tag;

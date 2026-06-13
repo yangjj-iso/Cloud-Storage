@@ -15,6 +15,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,11 +29,14 @@ public class FileMetaService {
 
     private final FileMetaMapper mapper;
     private final RedisService redis;
+    private final StringRedisTemplate redisTemplate;
     private final Cache<String, FileMeta> localCache;
 
-    public FileMetaService(FileMetaMapper mapper, RedisService redis, CloudchunkProperties props) {
+    public FileMetaService(FileMetaMapper mapper, RedisService redis,
+                           StringRedisTemplate redisTemplate, CloudchunkProperties props) {
         this.mapper = mapper;
         this.redis = redis;
+        this.redisTemplate = redisTemplate;
         CloudchunkProperties.Cache c = props.getCache();
         if (c.isFileMetaEnabled()) {
             this.localCache = Caffeine.newBuilder()
@@ -164,6 +168,7 @@ public class FileMetaService {
         try {
             redis.delete(RedisKeys.fileMeta(fileId));
             redis.delete(RedisKeys.fileUrl(fileId));
+            redisTemplate.convertAndSend(RedisKeys.CHANNEL_CACHE_INVALIDATE, fileId);
         } catch (Exception e) {
             log.debug("invalidate cache failed: {}", fileId, e);
         }

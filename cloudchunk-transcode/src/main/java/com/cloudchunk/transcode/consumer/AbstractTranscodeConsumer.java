@@ -24,6 +24,8 @@ public abstract class AbstractTranscodeConsumer implements RocketMQListener<Tran
 
     protected final Logger log = LoggerFactory.getLogger(getClass());
 
+    private static final int MAX_RETRY_BEFORE_GIVE_UP = 8;
+
     @Autowired protected FileMetaService fileMetaService;
     @Autowired protected TranscodeRecordMapper recordMapper;
     @Autowired protected StorageStrategyFactory storageFactory;
@@ -38,6 +40,7 @@ public abstract class AbstractTranscodeConsumer implements RocketMQListener<Tran
     public void onMessage(TranscodeMessage msg) {
         TraceContext.set(msg.getTraceId());
         String doneKey = RedisKeys.transcodeDone(msg.getFileId(), taskType());
+        int currentRetry = msg.getRetryCount();
         try {
             if (Boolean.TRUE.equals(redis.hasKey(doneKey))) {
                 log.debug("transcode already done: {} {}", msg.getFileId(), taskType());
@@ -62,15 +65,18 @@ public abstract class AbstractTranscodeConsumer implements RocketMQListener<Tran
                 redis.set(doneKey, "1", Duration.ofDays(7));
                 log.info("transcode ok: fileId={}, type={}", msg.getFileId(), taskType());
             } catch (TranscodeException te) {
-                record.setStatus(te.isRetryable() ? 0 : 3);
+                boolean giveUp = !te.isRetryable() || currentRetry >= MAX_RETRY_BEFORE_GIVE_UP;
+                record.setStatus(giveUp ? 3 : 0);
                 record.setErrorMsg(te.getMessage());
                 record.setFinishedAt(LocalDateTime.now());
                 recordMapper.updateById(record);
-                if (te.isRetryable()) {
-                    log.warn("transcode retryable: fileId={}, type={}, reason={}",
-                            msg.getFileId(), taskType(), te.getMessage());
-                    throw te;  // RocketMQ 会重投
+                if (!giveUp) {
+                    log.warn("transcode retryable: fileId={}, type={}, retry={}, reason={}",
+                            msg.getFileId(), taskType(), currentRetry, te.getMessage());
+                    throw te;
                 }
+                log.error("[TRANSCODE-ALERT] giving up after {} retries: fileId={}, type={}, reason={}",
+                        currentRetry, msg.getFileId(), taskType(), te.getMessage());
                 fileMetaService.updateTranscodeStatus(msg.getFileId(), TranscodeStatus.FAILED);
             } catch (Exception e) {
                 record.setStatus(3);
@@ -78,7 +84,8 @@ public abstract class AbstractTranscodeConsumer implements RocketMQListener<Tran
                 record.setFinishedAt(LocalDateTime.now());
                 recordMapper.updateById(record);
                 fileMetaService.updateTranscodeStatus(msg.getFileId(), TranscodeStatus.FAILED);
-                log.error("transcode failed: fileId={}, type={}", msg.getFileId(), taskType(), e);
+                log.error("[TRANSCODE-ALERT] transcode failed (non-retryable): fileId={}, type={}",
+                        msg.getFileId(), taskType(), e);
             }
         } finally {
             TraceContext.clear();
