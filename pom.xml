@@ -157,6 +157,7 @@
                     <artifactId>spring-boot-maven-plugin</artifactId>
                     <version>${spring-boot.version}</version>
                     <configuration>
+                        <skip>true</skip>
                         <excludes>
                             <exclude>
                                 <groupId>org.projectlombok</groupId>
