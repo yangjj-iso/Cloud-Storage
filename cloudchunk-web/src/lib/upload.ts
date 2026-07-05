@@ -45,6 +45,27 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
   const throwIfAborted = () => {
     if (abortSignal?.aborted) throw new DOMException('aborted', 'AbortError');
   };
+  const abortReason = () => (abortSignal as (AbortSignal & { reason?: unknown }) | undefined)?.reason;
+  const waitWithAbort = (ms: number) =>
+    new Promise<void>((resolve, reject) => {
+      if (abortSignal?.aborted) {
+        reject(new DOMException('aborted', 'AbortError'));
+        return;
+      }
+      let timer = 0;
+      let cleanup = () => {};
+      const onAbort = () => {
+        window.clearTimeout(timer);
+        cleanup();
+        reject(new DOMException('aborted', 'AbortError'));
+      };
+      cleanup = () => abortSignal?.removeEventListener('abort', onAbort);
+      timer = window.setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+      abortSignal?.addEventListener('abort', onAbort, { once: true });
+    });
 
   let stage: 'HASH' | 'INIT' | 'UPLOAD' | 'MERGE' = 'HASH';
   try {
@@ -67,6 +88,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
         file,
         chunkSize,
         (done: number, total: number) => cb.onHashProgress(done, total),
+        abortSignal,
       );
       md5 = result.fileMd5;
       chunkHashes = result.chunkHashes;
@@ -87,12 +109,21 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
       chunkSize,
       chunkTotal,
       mimeType: file.type || 'application/octet-stream',
-    });
+    }, abortSignal);
     throwIfAborted();
 
     if (init.mode === 'INSTANT') {
       // 秒传命中：后端已经有相同 MD5 的可用文件，前端不用再传任何分片。
-      cb.onStatus('DONE', { fileId: init.fileId, mode: 'INSTANT', finishedAt: Date.now() });
+      cb.onStatus('DONE', {
+        fileId: init.fileId,
+        mode: 'INSTANT',
+        chunkSize,
+        chunkTotal,
+        uploadedChunks: chunkTotal,
+        bytesTransferred: file.size,
+        speed: 0,
+        finishedAt: Date.now(),
+      });
       cb.onDone(init.fileId);
       return;
     }
@@ -119,7 +150,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
       try {
         const md5Map: Record<number, string> = {};
         for (const idx of missingBefore) md5Map[idx] = chunkHashes[idx];
-        const deduped = await api.dedupChunks(init.fileId, md5Map);
+        const deduped = await api.dedupChunks(init.fileId, md5Map, abortSignal);
         for (const idx of deduped) uploaded.add(idx);
         if (deduped.length > 0) {
           cb.onStatus('UPLOADING', {
@@ -153,7 +184,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
       const to = Math.min(presignFetched + Math.max(PRESIGN_BATCH, needed), indices.length);
       const batch = indices.slice(from, to);
       try {
-        const urls = await api.presignChunks(init.fileId, batch);
+        const urls = await api.presignChunks(init.fileId, batch, abortSignal);
         Object.assign(presignedUrls, urls);
         presignFetched = to;
       } catch {
@@ -168,6 +199,13 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     let fastStreak = 0;
     let activeWorkers = 0;
     let firstError: Error | null = null;
+    const workerPromises: Promise<void>[] = [];
+
+    function spawnWorker(): Promise<void> {
+      const p = worker();
+      workerPromises.push(p);
+      return p;
+    }
 
     /** 单片上传（带重试），优先 presigned PUT 直传 MinIO */
     async function uploadOneChunk(idx: number): Promise<number> {
@@ -188,7 +226,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
               signal: abortSignal,
             });
             if (!putRes.ok) throw new Error(`MinIO PUT ${putRes.status}`);
-            await api.confirmChunk(init.fileId, idx, chunkMd5);
+            await api.confirmChunk(init.fileId, idx, chunkMd5, abortSignal);
           } else {
             await api.uploadChunk(
               { fileId: init.fileId, chunkIndex: idx, chunkMd5, chunkSize: blob.size, blob },
@@ -207,7 +245,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
           if (attempt >= MAX_RETRIES) throw e;
           const delay = RETRY_BASE_MS * Math.pow(2, attempt);
           console.warn(`[upload] chunk ${idx} attempt ${attempt + 1} failed, retry in ${delay}ms`, e);
-          await new Promise((r) => setTimeout(r, delay));
+          await waitWithAbort(delay);
         }
       }
       return 0; // unreachable
@@ -225,12 +263,14 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
           const idx = indices[cursor++];
           const elapsed_ms = await uploadOneChunk(idx);
 
-          bytesSoFar += Math.min(actualChunkSize, file.size - idx * actualChunkSize);
+          uploaded.add(idx);
+          const bytesDelta = Math.min(actualChunkSize, file.size - idx * actualChunkSize);
+          bytesSoFar += bytesDelta;
           const elapsed = (Date.now() - startTs) / 1000;
           const speed = elapsed > 0 ? bytesSoFar / elapsed : 0;
           // UI 进度按“客户端已完成上传的分片”推进；
           // 后端最终可信进度仍以 confirmChunk/uploadChunk 写入的 Redis 进度为准。
-          cb.onChunkDone(idx, actualChunkSize, speed);
+          cb.onChunkDone(idx, bytesDelta, speed);
 
           // 每 10 片持久化一次上传进度到 IndexedDB（断电 / 关标签页后可恢复）
           if (idx % 10 === 0 || cursor >= indices.length) {
@@ -256,7 +296,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
               fastStreak = 0;
               // 启动新 worker
               if (activeWorkers < concurrency && cursor < indices.length) {
-                worker(); // fire-and-forget
+                spawnWorker();
               }
             }
           } else {
@@ -282,9 +322,10 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     await ensurePresigned(PRESIGN_BATCH);
 
     const initialWorkers = Math.min(concurrency, indices.length || 1);
-    const promises: Promise<void>[] = [];
-    for (let i = 0; i < initialWorkers; i++) promises.push(worker());
-    await Promise.allSettled(promises);
+    for (let i = 0; i < initialWorkers; i++) spawnWorker();
+    for (let i = 0; i < workerPromises.length; i++) {
+      await workerPromises[i].catch(() => void 0);
+    }
     if (firstError) throw firstError;
     throwIfAborted();
 
@@ -296,11 +337,22 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     await api.mergeUpload(init.fileId);
     // 上传成功，清除 IndexedDB 持久化状态
     delUploadState(init.fileId).catch(() => {});
-    cb.onStatus('DONE', { finishedAt: Date.now() });
+    cb.onStatus('DONE', {
+      uploadedChunks: actualChunkTotal,
+      bytesTransferred: file.size,
+      speed: 0,
+      finishedAt: Date.now(),
+    });
     cb.onDone(init.fileId);
   } catch (e) {
     if ((e as { name?: string }).name === 'AbortError') {
-      cb.onStatus('CANCELLED', { finishedAt: Date.now() });
+      const paused = abortReason() === 'pause';
+      cb.onStatus(paused ? 'PAUSED' : 'CANCELLED', {
+        speed: 0,
+        error: undefined,
+        abortController: undefined,
+        ...(paused ? {} : { finishedAt: Date.now() }),
+      });
       return;
     }
     const raw = e instanceof Error ? e : new Error(String(e));

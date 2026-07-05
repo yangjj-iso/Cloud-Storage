@@ -6,21 +6,51 @@ import { UploadDropZone } from './components/UploadDropZone';
 import { UploadQueue } from './components/UploadQueue';
 import { FilesView } from './components/FilesView';
 import { FileDrawer } from './components/FileDrawer';
+import { DriveView } from './components/DriveView';
+import { RecycleBin } from './components/RecycleBin';
+import { ShareList } from './components/ShareList';
+import { AdminPanel } from './components/AdminPanel';
 import { Toaster } from './components/ui/Toaster';
 import { useAppStore } from './store';
+import { LoginPage } from './components/LoginPage';
 
 export default function App() {
+  const authChecked = useAppStore((s) => s.authChecked);
+  const authUser = useAppStore((s) => s.authUser);
+  const initAuth = useAppStore((s) => s.initAuth);
   const view = useAppStore((s) => s.view);
   const refreshQuota = useAppStore((s) => s.refreshQuota);
   const refreshFiles = useAppStore((s) => s.refreshFiles);
 
   useEffect(() => {
+    initAuth();
+  }, [initAuth]);
+
+  useEffect(() => {
+    if (!authUser) return;
     refreshQuota();
     refreshFiles();
     const t = setInterval(refreshQuota, 30000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authUser]);
+
+  if (!authChecked) {
+    return (
+      <div className="flex h-full items-center justify-center bg-slate-50 text-sm text-slate-500">
+        加载中...
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <>
+        <LoginPage />
+        <Toaster />
+      </>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 bg-gradient-to-br from-slate-50 via-white to-brand-50/30">
@@ -29,7 +59,7 @@ export default function App() {
         <Topbar />
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-            {view === 'upload' ? (
+            {view === 'upload' && (
               <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
                 <div className="flex flex-col gap-5">
                   <UploadDropZone />
@@ -40,9 +70,12 @@ export default function App() {
                   <HelpCard />
                 </aside>
               </div>
-            ) : (
-              <FilesView />
             )}
+            {view === 'files' && <FilesView />}
+            {view === 'drive' && <DriveView />}
+            {view === 'recycle' && <RecycleBin />}
+            {view === 'shares' && <ShareList />}
+            {view === 'admin' && <AdminPanel />}
           </div>
         </div>
       </main>

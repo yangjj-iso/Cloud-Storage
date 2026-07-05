@@ -69,6 +69,15 @@ rocketmq:
     retry-times-when-send-failed: 2
 
 cloudchunk:
+  auth:
+    token-ttl: P7D
+  websocket:
+    allowed-origins: ${WS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080}
+  admin:
+    seed-enabled: ${ADMIN_SEED_ENABLED:false}
+    seed-username: ${ADMIN_SEED_USERNAME:}
+    seed-email: ${ADMIN_SEED_EMAIL:admin@cloudchunk.local}
+    seed-password: ${ADMIN_SEED_PASSWORD:}
   chunk:
     default-size: 10485760    # 10 MB
     min-size: 1048576
@@ -124,6 +133,41 @@ management:
   endpoint:
     health:
       show-details: when_authorized
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true    # HTTP 时延直方图，便于 Grafana P99
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING:0.0}   # 默认不采样（无 collector 不产生导出噪声）；设 1.0 全采样
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      storage:            # 包裹 MinIO 调用：持续故障时快速失败防雪崩
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      mq:                 # 包裹 RocketMQ 发送
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+  retry:
+    instances:
+      mq:                 # MQ 发送瞬时失败重试（消息可重放，消费者幂等）
+        max-attempts: 3
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
 
 springdoc:
   api-docs:

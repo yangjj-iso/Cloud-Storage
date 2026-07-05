@@ -31,5 +31,12 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
         </dependency>
+        <!-- Resilience4j 熔断（核心）：为存储调用提供 CircuitBreaker，快速失败避免雪崩。
+             注册表 Bean 由 mq 模块引入的 resilience4j-spring-boot3 在应用上下文中创建。 -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-circuitbreaker</artifactId>
+            <version>2.2.0</version>
+        </dependency>
     </dependencies>
 </project>

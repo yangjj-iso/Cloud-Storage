@@ -1,10 +1,10 @@
 package com.cloudchunk.common.trace;
 
-import com.cloudchunk.common.constant.CommonConstants;
+import com.cloudchunk.common.exception.BizException;
+import com.cloudchunk.common.exception.ErrorCode;
 
 /**
  * 最简用户上下文：通过 ThreadLocal 承载 userId。
- * 生产环境应接入鉴权体系；此处仅供演示。
  */
 public final class UserContext {
 
@@ -14,9 +14,12 @@ public final class UserContext {
 
     public static Long get() { return CURRENT.get(); }
 
-    public static long getOrDefault() {
+    public static long requireUserId() {
         Long v = CURRENT.get();
-        return v == null ? CommonConstants.DEV_USER_ID : v;
+        if (v == null) {
+            throw BizException.of(ErrorCode.UNAUTHORIZED);
+        }
+        return v;
     }
 
     public static void clear() { CURRENT.remove(); }

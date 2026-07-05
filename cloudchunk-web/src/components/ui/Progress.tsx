@@ -3,13 +3,14 @@ import { cn } from '../../lib/utils';
 interface Props {
   value: number; // 0-100
   indeterminate?: boolean;
-  variant?: 'brand' | 'success' | 'danger' | 'neutral';
+  variant?: 'brand' | 'success' | 'warning' | 'danger' | 'neutral';
   className?: string;
 }
 
 const fillClass = {
   brand: 'bg-brand-600',
   success: 'bg-emerald-500',
+  warning: 'bg-amber-500',
   danger: 'bg-rose-500',
   neutral: 'bg-slate-400',
 };

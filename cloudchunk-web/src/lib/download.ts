@@ -2,11 +2,13 @@
  * 并发 Range 下载工具
  *
  * 策略：
- *  - 文件 < PARALLEL_THRESHOLD → 直接 window.open(url)
+ *  - 文件 < PARALLEL_THRESHOLD → 预签名链接 window.open；后端鉴权链接 fetch Blob
  *  - 支持 showSaveFilePicker (File System Access API) → 并发 Range 分块，流式写盘，不撑爆内存
  *  - 不支持 FSAPI 且文件 < BLOB_MAX → 并发 Range 拼 Blob，触发 <a> 下载
- *  - 其余兜底 → window.open(url)
+ *  - 其余兜底 → 预签名链接交给浏览器；后端鉴权链接提示用户换支持 FSAPI 的浏览器
  */
+
+import { getAuthHeader } from './api';
 
 const CHUNK_SIZE = 50 * 1024 * 1024;   // 每块 50 MB
 const CONCURRENCY = 4;                   // 并发线程数
@@ -26,9 +28,14 @@ export async function downloadFile(opts: {
   onProgress?: (p: DownloadProgress) => void;
 }): Promise<void> {
   const { url, fileName, fileSize, onProgress } = opts;
+  const backend = isBackendUrl(url);
 
   if (!url || fileSize <= PARALLEL_THRESHOLD) {
-    window.open(url, '_blank');
+    if (backend) {
+      await downloadSingleRequest(url, fileName, onProgress);
+    } else {
+      window.open(url, '_blank');
+    }
     return;
   }
 
@@ -38,6 +45,8 @@ export async function downloadFile(opts: {
     await downloadWithFSAPI(url, fileName, fileSize, onProgress);
   } else if (fileSize <= BLOB_MAX) {
     await downloadAsBlob(url, fileName, fileSize, onProgress);
+  } else if (backend) {
+    throw new Error('当前浏览器不支持大文件流式保存，请使用支持 File System Access API 的浏览器下载。');
   } else {
     window.open(url, '_blank');
   }
@@ -115,15 +124,50 @@ async function downloadAsBlob(
   URL.revokeObjectURL(a.href);
 }
 
+async function downloadSingleRequest(
+  url: string,
+  fileName: string,
+  onProgress?: (p: DownloadProgress) => void,
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (isBackendUrl(url)) {
+    Object.assign(headers, getAuthHeader());
+  }
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    throw new Error(`Download failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  onProgress?.(makeProgress(blob.size, blob.size || 1));
+  triggerBlobDownload(blob, fileName);
+}
+
 /* ------------------------------------------------------------------ */
 /*  工具函数                                                            */
 /* ------------------------------------------------------------------ */
 async function fetchRange(url: string, start: number, end: number): Promise<ArrayBuffer> {
-  const res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
-  if (!res.ok && res.status !== 206) {
+  // 后端接口需要 Authorization；预签名 MinIO URL 不带业务鉴权头。
+  const headers: Record<string, string> = { Range: `bytes=${start}-${end}` };
+  if (isBackendUrl(url)) {
+    Object.assign(headers, getAuthHeader());
+  }
+  const res = await fetch(url, { headers });
+  if (res.status !== 206) {
     throw new Error(`Range fetch failed: ${res.status} ${start}-${end}`);
   }
   return res.arrayBuffer();
+}
+
+function isBackendUrl(url: string): boolean {
+  return url.startsWith('/api/') || url.includes('/api/v1/');
+}
+
+function triggerBlobDownload(blob: Blob, fileName: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function buildChunks(fileSize: number): { start: number; end: number }[] {

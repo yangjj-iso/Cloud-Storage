@@ -12,6 +12,7 @@
 | 4 | [03-异步校验与转码](./03-checksum-transcode-flow.md) | RocketMQ 管道、模板方法模式、DLQ 兜底、补偿扫描 | 12 分钟 |
 | 5 | [04-下载与缓存](./04-download-flow.md) | 预签名 URL、Range 分段、Caffeine+Redis 两级缓存、Pub/Sub 一致性 | 10 分钟 |
 | 6 | [05-限流与清理](./05-ratelimit-cleanup-flow.md) | Redis Lua 令牌桶、僵尸分片清理、存储策略模式 | 10 分钟 |
+| 7 | [06-网盘/分享/配额预留](./06-drive-share-quota-flow.md) | 网盘目录树与回收站(CTE)、ZIP 打包、分享(浏览/下载/转存)、配额预留、Redisson 锁、可观测 | 15 分钟 |
 
 ## 面试准备
 

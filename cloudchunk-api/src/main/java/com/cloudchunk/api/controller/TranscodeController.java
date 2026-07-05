@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.model.R;
+import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.service.FileMetaService;
 import com.cloudchunk.core.transcode.entity.TranscodeRecord;
@@ -38,7 +39,8 @@ public class TranscodeController {
 
     @GetMapping("/{fileId}")
     public R<Map<String, Object>> status(@PathVariable String fileId) {
-        FileMeta meta = fileMetaService.getOrThrow(fileId);
+        long userId = UserContext.requireUserId();
+        FileMeta meta = fileMetaService.getAvailableForUserOrThrow(fileId, userId);
         List<TranscodeRecord> records = recordMapper.selectList(new LambdaQueryWrapper<TranscodeRecord>()
                 .eq(TranscodeRecord::getFileId, fileId)
                 .orderByDesc(TranscodeRecord::getCreatedAt));
@@ -51,7 +53,8 @@ public class TranscodeController {
 
     @PostMapping("/{fileId}/retry")
     public R<Void> retry(@PathVariable String fileId) {
-        FileMeta meta = fileMetaService.getOrThrow(fileId);
+        long userId = UserContext.requireUserId();
+        FileMeta meta = fileMetaService.getAvailableForUserOrThrow(fileId, userId);
         if (meta.getBucket() == null || meta.getObjectKey() == null) {
             throw BizException.of(ErrorCode.TRANSCODE_NOT_FOUND, fileId);
         }

@@ -1,16 +1,23 @@
-import { CloudUpload, FolderOpen, Github, Package2 } from 'lucide-react';
+import { CloudUpload, FolderOpen, Github, Package2, Trash2, Share2, Shield, HardDrive } from 'lucide-react';
 import { useAppStore, type View } from '../store';
 import { cn } from '../lib/utils';
-
-const items: Array<{ id: View; label: string; icon: typeof CloudUpload }> = [
-  { id: 'upload', label: '上传中心', icon: CloudUpload },
-  { id: 'files', label: '我的文件', icon: FolderOpen },
-];
 
 export function Sidebar() {
   const view = useAppStore((s) => s.view);
   const setView = useAppStore((s) => s.setView);
   const quota = useAppStore((s) => s.quota);
+  const authUser = useAppStore((s) => s.authUser);
+
+  const items: Array<{ id: View; label: string; icon: typeof CloudUpload; adminOnly?: boolean }> = [
+    { id: 'upload', label: '上传中心', icon: CloudUpload },
+    { id: 'drive', label: '我的网盘', icon: HardDrive },
+    { id: 'files', label: '文件列表', icon: FolderOpen },
+    { id: 'shares', label: '我的分享', icon: Share2 },
+    { id: 'recycle', label: '回收站', icon: Trash2 },
+    { id: 'admin', label: '管理后台', icon: Shield, adminOnly: true },
+  ];
+
+  const visibleItems = items.filter((i) => !i.adminOnly || authUser?.role === 'admin');
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-slate-200 bg-white/80 px-4 py-5 backdrop-blur md:flex">
@@ -27,7 +34,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex flex-col gap-1">
-        {items.map(({ id, label, icon: Icon }) => (
+        {visibleItems.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setView(id)}

@@ -82,7 +82,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(...) {
         if (!cfg.isEnabled()) { chain.doFilter(request, response); return; }
 
-        long userId = UserContext.getOrDefault();
+        long userId = UserContext.requireUserId();
 
         // 上传分片限流：POST /upload/chunk
         if ("POST".equalsIgnoreCase(method) && path.contains("/upload/chunk")) {
@@ -177,12 +177,9 @@ private void cleanOne(UploadSession s) {
     try {
         storageFactory.current().deleteBatch(s.getBucket(), partKeys);
     } catch (Exception e) {
-        // MinIO 删除失败只记 warn，不阻断 DB 状态更新
-        // 下次清理任务会重新尝试（因为 DB 状态还是 RUNNING）
-        // 等一下，这里有个问题：下面会把状态改成 EXPIRED...
-        // 实际上如果 MinIO 删除失败但 DB 标记了 EXPIRED，这些分片就永远不会被再次清理了。
-        // 但这是一个可接受的 trade-off：MinIO 有自己的生命周期策略可以兜底。
         log.warn("delete stale parts failed: fileId={}", s.getFileId(), e.getMessage());
+        // 删除失败不能标记 EXPIRED，否则 DB 不再进入清理扫描，临时对象会失去重试入口。
+        throw e;
     }
 
     // Step 3: CAS 更新 DB 状态（只有仍为 RUNNING/MERGING 的才标记 EXPIRED）

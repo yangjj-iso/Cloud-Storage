@@ -40,6 +40,7 @@
         <module>cloudchunk-transcode</module>
         <module>cloudchunk-api</module>
         <module>cloudchunk-boot</module>
+        <module>cloudchunk-benchmark</module>
     </modules>
 
     <dependencyManagement>

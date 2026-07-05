@@ -17,4 +17,26 @@
           AND deleted_at IS NULL
     </update>
 
+    <select id="selectActiveUserFilePage" resultType="com.cloudchunk.core.file.entity.FileMeta">
+        SELECT fm.*
+        FROM file_meta fm
+        WHERE fm.status != #{deletedStatus}
+          AND fm.deleted_at IS NULL
+          AND EXISTS (
+              SELECT 1
+              FROM user_file uf
+              WHERE uf.user_id = #{userId}
+                AND uf.status = 0
+                AND uf.is_dir = 0
+                AND uf.file_id = fm.file_id
+          )
+        <if test="mimePrefix != null and mimePrefix != ''">
+          AND fm.mime_type LIKE CONCAT(#{mimePrefix}, '%')
+        </if>
+        <if test="keyword != null and keyword != ''">
+          AND fm.file_name LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        ORDER BY fm.created_at DESC
+    </select>
+
 </mapper>

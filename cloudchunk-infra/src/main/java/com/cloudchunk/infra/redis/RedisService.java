@@ -32,6 +32,10 @@ public class RedisService {
         return redis.opsForValue().get(key);
     }
 
+    public Long increment(String key) {
+        return redis.opsForValue().increment(key);
+    }
+
     public Boolean setIfAbsent(String key, String value, Duration ttl) {
         return redis.opsForValue().setIfAbsent(key, value, ttl);
     }

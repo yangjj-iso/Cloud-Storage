@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cloudchunk.core.drive.mapper.UserFileMapper">
+
+    <!--
+      MySQL 8 递归 CTE：一次查出 root 及其整棵子树，替代逐层 BFS 的 N+1 查询。
+      root 按 id+user_id 命中（不受 status 过滤）；后代可选按 status 过滤，
+      与原 Service 端 BFS 的语义保持一致。存在异常父子环时会触发 MySQL 递归深度上限报错
+      （cte_max_recursion_depth），不会无限递归。
+    -->
+    <select id="selectSubtree" resultType="com.cloudchunk.core.drive.entity.UserFile">
+        WITH RECURSIVE sub AS (
+            SELECT id, user_id, file_id, parent_id, file_name, is_dir, file_size,
+                   status, deleted_at, created_at, updated_at
+            FROM user_file
+            WHERE id = #{rootId} AND user_id = #{userId}
+            UNION ALL
+            SELECT c.id, c.user_id, c.file_id, c.parent_id, c.file_name, c.is_dir, c.file_size,
+                   c.status, c.deleted_at, c.created_at, c.updated_at
+            FROM user_file c
+            INNER JOIN sub s ON c.parent_id = s.id
+            WHERE c.user_id = #{userId}
+            <if test="status != null">
+                AND c.status = #{status}
+            </if>
+        )
+        SELECT id, user_id, file_id, parent_id, file_name, is_dir, file_size,
+               status, deleted_at, created_at, updated_at
+        FROM sub
+        LIMIT #{limit}
+    </select>
+
+</mapper>

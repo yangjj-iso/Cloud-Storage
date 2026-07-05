@@ -3,6 +3,8 @@ package com.cloudchunk.mq.producer;
 import com.cloudchunk.common.constant.MqTopics;
 import com.cloudchunk.common.trace.TraceContext;
 import com.cloudchunk.mq.message.ChecksumMessage;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.slf4j.Logger;
@@ -24,6 +26,8 @@ public class ChecksumProducer {
         this.rocketMQTemplate = rocketMQTemplate;
     }
 
+    @CircuitBreaker(name = "mq")
+    @Retry(name = "mq")
     public void publish(ChecksumMessage msg) {
         if (msg.getProducedAt() == null) msg.setProducedAt(Instant.now());
         if (msg.getTraceId() == null) msg.setTraceId(TraceContext.get());

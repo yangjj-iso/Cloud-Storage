@@ -17,4 +17,12 @@
         WHERE user_id = #{userId}
     </update>
 
+    <update id="tryAddUsed">
+        UPDATE user_quota
+        SET used_bytes = used_bytes + #{bytes},
+            file_count = file_count + 1
+        WHERE user_id = #{userId}
+          AND used_bytes + #{bytes} &lt;= total_bytes
+    </update>
+
 </mapper>

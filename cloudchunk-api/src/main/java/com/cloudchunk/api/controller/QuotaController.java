@@ -20,7 +20,7 @@ public class QuotaController {
 
     @GetMapping("/me")
     public R<UserQuota> me() {
-        long userId = UserContext.getOrDefault();
+        long userId = UserContext.requireUserId();
         return R.ok(quotaService.getOrDefault(userId));
     }
 }

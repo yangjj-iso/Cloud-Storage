@@ -1,5 +1,6 @@
 ### Java / Maven ###
 target/
+dependency-reduced-pom.xml
 *.class
 *.jar
 *.war
@@ -39,6 +40,9 @@ logs/
 /data/
 /tmp/
 /local-storage/
+__pycache__/
+benchmark-output.txt
+RESUME.md
 
 ### Deploy local data ###
 deploy/mysql/data/

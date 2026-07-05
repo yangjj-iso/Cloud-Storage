@@ -1,4 +1,4 @@
-import { CloudUpload, FolderOpen } from 'lucide-react';
+import { CloudUpload, FolderOpen, LogOut, UserRound } from 'lucide-react';
 import { useAppStore, type View } from '../store';
 import { cn, formatBytes } from '../lib/utils';
 
@@ -7,6 +7,8 @@ export function Topbar() {
   const setView = useAppStore((s) => s.setView);
   const quota = useAppStore((s) => s.quota);
   const uploads = useAppStore((s) => s.uploads);
+  const authUser = useAppStore((s) => s.authUser);
+  const logout = useAppStore((s) => s.logout);
 
   const active = uploads.filter((u) =>
     ['HASHING', 'INITIATING', 'UPLOADING', 'MERGING'].includes(u.status)
@@ -38,7 +40,13 @@ export function Topbar() {
       </div>
 
       <div className="hidden text-lg font-semibold tracking-tight text-slate-900 md:block">
-        {view === 'upload' ? '上传中心' : '我的文件'}
+        {view === 'upload' ? '上传中心'
+          : view === 'drive' ? '我的网盘'
+          : view === 'files' ? '文件列表'
+          : view === 'shares' ? '我的分享'
+          : view === 'recycle' ? '回收站'
+          : view === 'admin' ? '管理后台'
+          : 'CloudChunk'}
       </div>
 
       <div className="ml-auto flex items-center gap-3 text-xs">
@@ -60,6 +68,20 @@ export function Topbar() {
             <span className="text-slate-400"> / {formatBytes(quota.totalBytes)}</span>
           </span>
         )}
+        {authUser && (
+          <span className="hidden items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600 sm:inline-flex">
+            <UserRound className="h-3.5 w-3.5" />
+            {authUser.nickname || authUser.username}
+          </span>
+        )}
+        <button
+          onClick={() => logout()}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          aria-label="退出登录"
+          title="退出登录"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
       </div>
     </header>
   );

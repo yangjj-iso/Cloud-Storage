@@ -5,13 +5,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.SubProtocolCapable;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
-import org.springframework.web.util.UriTemplate;
 
 import java.io.IOException;
-import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,10 +24,10 @@ import java.util.concurrent.CopyOnWriteArraySet;
  * 调用 {@link #broadcast} 向该 fileId 的所有订阅者推送进度 JSON。
  */
 @Component
-public class UploadProgressHandler extends TextWebSocketHandler {
+public class UploadProgressHandler extends TextWebSocketHandler implements SubProtocolCapable {
 
     private static final Logger log = LoggerFactory.getLogger(UploadProgressHandler.class);
-    private static final UriTemplate URI_TEMPLATE = new UriTemplate("/ws/upload/{fileId}");
+    private static final List<String> SUB_PROTOCOLS = List.of("cloudchunk-upload");
 
     /** fileId → 连接集合 */
     private final Map<String, Set<WebSocketSession>> registry = new ConcurrentHashMap<>();
@@ -38,16 +38,26 @@ public class UploadProgressHandler extends TextWebSocketHandler {
     }
 
     @Override
+    public List<String> getSubProtocols() {
+        return SUB_PROTOCOLS;
+    }
+
+    @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        String fileId = extractFileId(session);
-        if (fileId == null) return;
+        String fileId = authenticatedFileId(session);
+        if (fileId == null) {
+            try {
+                session.close(CloseStatus.POLICY_VIOLATION);
+            } catch (IOException ignored) {}
+            return;
+        }
         registry.computeIfAbsent(fileId, k -> new CopyOnWriteArraySet<>()).add(session);
         log.debug("ws connected: fileId={}, sessionId={}", fileId, session.getId());
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        String fileId = extractFileId(session);
+        String fileId = authenticatedFileId(session);
         if (fileId == null) return;
         Set<WebSocketSession> set = registry.get(fileId);
         if (set != null) {
@@ -82,10 +92,11 @@ public class UploadProgressHandler extends TextWebSocketHandler {
         }
     }
 
-    private String extractFileId(WebSocketSession session) {
-        URI uri = session.getUri();
-        if (uri == null) return null;
-        Map<String, String> vars = URI_TEMPLATE.match(uri.getPath());
-        return vars.get("fileId");
+    private String authenticatedFileId(WebSocketSession session) {
+        Object fileId = session.getAttributes().get(UploadWsAuthInterceptor.ATTR_FILE_ID);
+        if (fileId instanceof String value && !value.isBlank()) {
+            return value;
+        }
+        return null;
     }
 }

@@ -18,31 +18,45 @@ export function hashFileWorker(
   blob: Blob,
   chunkSize: number,
   onProgress?: (processed: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<HashResult> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('aborted', 'AbortError'));
+      return;
+    }
     let worker: Worker;
     try {
       worker = new Worker(new URL('./md5.worker.ts', import.meta.url), { type: 'module' });
     } catch {
-      resolve(hashFile(blob, chunkSize, onProgress));
+      resolve(hashFile(blob, chunkSize, onProgress, signal));
       return;
     }
     const id = `md5-${++_workerCount}`;
+    const onAbort = () => {
+      worker.terminate();
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const cleanup = () => {
+      signal?.removeEventListener('abort', onAbort);
+      worker.terminate();
+    };
     worker.onmessage = (e: MessageEvent) => {
       const msg = e.data;
       if (msg.id !== id) return;
       if (msg.type === 'progress') {
         onProgress?.(msg.processed as number, msg.total as number);
       } else if (msg.type === 'done') {
-        worker.terminate();
+        cleanup();
         resolve({ fileMd5: msg.fileMd5 as string, chunkHashes: msg.chunkHashes as string[] });
       } else if (msg.type === 'error') {
-        worker.terminate();
+        cleanup();
         reject(new Error(`MD5 Worker 错误: ${msg.message as string}`));
       }
     };
     worker.onerror = (err) => {
-      worker.terminate();
+      cleanup();
       reject(new Error(`MD5 Worker 崩溃: ${err.message}`));
     };
     worker.postMessage({ id, blob, chunkSize });
@@ -56,6 +70,7 @@ export async function hashFile(
   blob: Blob,
   chunkSize: number,
   onProgress?: (processed: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<HashResult> {
   const fileHasher = await createMD5();
   let chunkHasher = await createMD5();
@@ -64,10 +79,16 @@ export async function hashFile(
   let offset = 0;
   let chunkBytes = 0;
 
+  const throwIfAborted = () => {
+    if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+  };
+
   try {
     while (offset < total) {
+      throwIfAborted();
       const end = Math.min(offset + READ_BUF, total);
       const buf = await blob.slice(offset, end).arrayBuffer();
+      throwIfAborted();
       const view = new Uint8Array(buf);
 
       fileHasher.update(view);
@@ -92,12 +113,14 @@ export async function hashFile(
       if (offset < total) await new Promise((r) => setTimeout(r, 0));
     }
 
+    throwIfAborted();
     if (chunkBytes > 0) {
       chunkHashes.push(chunkHasher.digest('hex'));
     }
 
     return { fileMd5: fileHasher.digest('hex'), chunkHashes };
   } catch (e) {
+    if ((e as { name?: string }).name === 'AbortError') throw e;
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`MD5 计算失败（${offset}/${total} bytes）: ${msg}`);
   }

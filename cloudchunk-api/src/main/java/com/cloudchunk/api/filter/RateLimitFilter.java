@@ -58,10 +58,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         String path = request.getRequestURI();
         String method = request.getMethod();
-        long userId = UserContext.getOrDefault();
 
         // 上传分片限流
         if ("POST".equalsIgnoreCase(method) && path.contains("/upload/chunk")) {
+            Long userId = UserContext.get();
+            if (userId == null) {
+                rejectUnauthorized(response);
+                return;
+            }
             if (!rateLimiter.tryAcquire(
                     RedisKeys.rateUpload(userId),
                     cfg.getUploadChunkRps(),
@@ -75,6 +79,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         // 下载限流
         if ("GET".equalsIgnoreCase(method) && path.contains("/file/") && path.endsWith("/download")) {
+            Long userId = UserContext.get();
+            if (userId == null) {
+                rejectUnauthorized(response);
+                return;
+            }
             if (!rateLimiter.tryAcquire(
                     RedisKeys.rateDownload(userId),
                     cfg.getDownloadRps(),
@@ -93,5 +102,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.setStatus(429);
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write("{\"code\":429,\"message\":\"Too Many Requests\"}");
+    }
+
+    private void rejectUnauthorized(HttpServletResponse response) throws IOException {
+        response.setStatus(401);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"code\":401,\"message\":\"Unauthorized\"}");
     }
 }

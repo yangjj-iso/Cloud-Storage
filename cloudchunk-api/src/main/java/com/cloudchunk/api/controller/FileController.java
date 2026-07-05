@@ -1,15 +1,19 @@
 package com.cloudchunk.api.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.cloudchunk.common.enums.FileStatus;
+import com.cloudchunk.common.exception.BizException;
+import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.model.PageResult;
 import com.cloudchunk.common.model.R;
 import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.download.service.DownloadService;
+import com.cloudchunk.core.drive.service.UserFileService;
 import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.mapper.FileMetaMapper;
 import com.cloudchunk.core.file.service.FileMetaService;
+import com.cloudchunk.core.quota.service.QuotaService;
+import com.cloudchunk.storage.StorageStrategyFactory;
+import com.cloudchunk.storage.model.GetRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -39,24 +43,65 @@ public class FileController {
     private final FileMetaService fileMetaService;
     private final DownloadService downloadService;
     private final FileMetaMapper fileMetaMapper;
+    private final QuotaService quotaService;
+    private final StorageStrategyFactory storageFactory;
+    private final UserFileService userFileService;
 
     public FileController(FileMetaService fileMetaService,
                           DownloadService downloadService,
-                          FileMetaMapper fileMetaMapper) {
+                          FileMetaMapper fileMetaMapper,
+                          QuotaService quotaService,
+                          StorageStrategyFactory storageFactory,
+                          UserFileService userFileService) {
         this.fileMetaService = fileMetaService;
         this.downloadService = downloadService;
         this.fileMetaMapper = fileMetaMapper;
+        this.quotaService = quotaService;
+        this.storageFactory = storageFactory;
+        this.userFileService = userFileService;
+    }
+
+    /**
+     * 缩略图（转码产物）。file_meta.thumbnail_url 保存的是同桶对象 key，这里鉴权后流式回源。
+     */
+    @GetMapping("/{fileId}/thumbnail")
+    public ResponseEntity<StreamingResponseBody> thumbnail(@PathVariable String fileId) {
+        long userId = UserContext.requireUserId();
+        FileMeta meta = fileMetaService.getAvailableForUserOrThrow(fileId, userId);
+        requireActiveEntry(fileId, userId);
+        String key = meta.getThumbnailUrl();
+        if (key == null || key.isBlank()) {
+            throw BizException.of(ErrorCode.FILE_NOT_FOUND, "no thumbnail");
+        }
+        String bucket = meta.getBucket();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_JPEG_VALUE);
+        headers.set(HttpHeaders.CACHE_CONTROL, "private, max-age=86400");
+        // 懒打开：只有真正开始写响应体时才回源，避免客户端提前断开导致对象流泄漏。
+        StreamingResponseBody body = out -> {
+            try (InputStream s = storageFactory.current().get(new GetRequest(bucket, key))) {
+                s.transferTo(out);
+                out.flush();
+            }
+        };
+        return new ResponseEntity<>(body, headers, HttpStatus.OK);
     }
 
     @GetMapping("/{fileId}")
     public R<FileMeta> get(@PathVariable String fileId) {
-        return R.ok(fileMetaService.getOrThrow(fileId));
+        long userId = UserContext.requireUserId();
+        requireActiveEntry(fileId, userId);
+        return R.ok(fileMetaService.getAccessibleOrThrow(fileId, userId));
     }
 
     @GetMapping("/{fileId}/url")
     public R<Map<String, Object>> url(@PathVariable String fileId,
                                       @RequestParam(defaultValue = "1800") long ttlSeconds) {
-        DownloadService.PresignedUrl u = downloadService.presign(fileId, Duration.ofSeconds(ttlSeconds));
+        if (ttlSeconds <= 0 || ttlSeconds > 3600) {
+            throw BizException.of(ErrorCode.INVALID_PARAMETER, "ttlSeconds must be between 1 and 3600");
+        }
+        long userId = UserContext.requireUserId();
+        DownloadService.PresignedUrl u = downloadService.presign(fileId, Duration.ofSeconds(ttlSeconds), userId);
         return R.ok(Map.of("url", u.url(),
                 "expireInSeconds", u.ttl() == null ? ttlSeconds : u.ttl().toSeconds()));
     }
@@ -81,7 +126,9 @@ public class FileController {
             @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
 
         // --- meta lookup (later will hit Caffeine cache) ---
-        FileMeta meta = fileMetaService.getAvailableOrThrow(fileId);
+        long userId = UserContext.requireUserId();
+        FileMeta meta = fileMetaService.getAvailableForUserOrThrow(fileId, userId);
+        requireActiveEntry(fileId, userId);
 
         // --- ETag 304 ---
         String etag = "\"" + meta.getFileMd5() + "\"";
@@ -91,7 +138,7 @@ public class FileController {
                     .build();
         }
 
-        DownloadService.DownloadStream ds = downloadService.open(fileId, range);
+        DownloadService.DownloadStream ds = downloadService.open(fileId, range, userId);
         long length = ds.end() - ds.start() + 1;
         String contentType = meta.getMimeType() == null
                 ? MediaType.APPLICATION_OCTET_STREAM_VALUE : meta.getMimeType();
@@ -130,7 +177,22 @@ public class FileController {
 
     @DeleteMapping("/{fileId}")
     public R<Map<String, Object>> delete(@PathVariable String fileId) {
-        fileMetaService.decRefCount(fileId);
+        long userId = UserContext.requireUserId();
+        int recycled = userFileService.recycleByFileId(userId, fileId);
+        if (recycled > 0) {
+            return R.ok(Map.of("fileId", fileId, "recycled", true, "deleted", false));
+        }
+
+        // 兼容早期没有 user_file 目录树的旧数据。
+        FileMeta before = fileMetaService.getAccessibleOrThrow(fileId, userId);
+        boolean removed = fileMetaService.removeReference(fileId, userId);
+        if (!removed && before.getOwnerId() != null && before.getOwnerId() == userId) {
+            removed = true; // 兼容旧数据：没有 file_reference，但 ownerId 是当前用户。
+        }
+        if (removed) {
+            fileMetaService.decRefCount(fileId);
+            quotaService.subUsed(userId, before.getFileSize());
+        }
         FileMeta meta = fileMetaService.getOrThrow(fileId);
         boolean actuallyDeleted = meta.getRefCount() != null && meta.getRefCount() <= 0;
         if (actuallyDeleted) {
@@ -144,26 +206,31 @@ public class FileController {
                                         @RequestParam(defaultValue = "20") long size,
                                         @RequestParam(required = false) String mimePrefix,
                                         @RequestParam(required = false) String keyword) {
-        long userId = UserContext.getOrDefault();
+        long userId = UserContext.requireUserId();
         long safeSize = Math.min(Math.max(size, 1), 100);
 
         Page<FileMeta> p = new Page<>(Math.max(page, 1), safeSize);
-        LambdaQueryWrapper<FileMeta> w = new LambdaQueryWrapper<FileMeta>()
-                .eq(FileMeta::getOwnerId, userId)
-                .ne(FileMeta::getStatus, FileStatus.DELETED)
-                .orderByDesc(FileMeta::getCreatedAt);
-        if (mimePrefix != null && !mimePrefix.isBlank()) {
-            w.likeRight(FileMeta::getMimeType, mimePrefix);
-        }
-        if (keyword != null && !keyword.isBlank()) {
-            w.like(FileMeta::getFileName, keyword);
-        }
-        Page<FileMeta> result = fileMetaMapper.selectPage(p, w);
+        Page<FileMeta> result = fileMetaMapper.selectActiveUserFilePage(
+                p,
+                userId,
+                normalizeFilter(mimePrefix),
+                normalizeFilter(keyword),
+                com.cloudchunk.common.enums.FileStatus.DELETED.getCode());
         return R.ok(new PageResult<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getRecords()));
     }
 
     /** 兜底响应：把常见 status 封装便于前端展示 */
     public ResponseEntity<String> notImplemented() {
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body("not implemented");
+    }
+
+    private void requireActiveEntry(String fileId, long userId) {
+        if (!userFileService.hasActiveFileEntry(userId, fileId)) {
+            throw BizException.of(ErrorCode.FILE_NOT_FOUND, fileId);
+        }
+    }
+
+    private String normalizeFilter(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

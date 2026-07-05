@@ -35,8 +35,23 @@ public final class RedisKeys {
     /** 下载限流（令牌桶，per-user） */
     public static final String RATE_DOWNLOAD = "cc:rate:download:%s";
 
+    /** 公开分享访问限流（令牌桶，per-share + per-client） */
+    public static final String RATE_SHARE = "cc:rate:share:%s:%s";
+
     /** Pub/Sub：file_meta 缓存失效通知 channel */
     public static final String CHANNEL_CACHE_INVALIDATE = "cc:cache:invalidate:file_meta";
+
+    /** 登录态 token -> userId */
+    public static final String AUTH_TOKEN = "cc:auth:token:%s";
+
+    /** 登录失败计数（per normalized account） */
+    public static final String AUTH_LOGIN_FAIL = "cc:auth:login-fail:%s";
+
+    /** 邮箱验证码发送限流（per type + email） */
+    public static final String EMAIL_RATE_LIMIT = "cc:email:rate:%s:%s";
+
+    /** 邮箱验证码校验失败计数（per type + email） */
+    public static final String EMAIL_VERIFY_FAIL = "cc:email:verify-fail:%s:%s";
 
     public static String uploadProgress(String fileId) {
         return String.format(UPLOAD_PROGRESS, fileId);
@@ -80,6 +95,26 @@ public final class RedisKeys {
 
     public static String rateDownload(long userId) {
         return String.format(RATE_DOWNLOAD, userId);
+    }
+
+    public static String rateShare(String shareId, String clientId) {
+        return String.format(RATE_SHARE, shareId, clientId);
+    }
+
+    public static String authToken(String token) {
+        return String.format(AUTH_TOKEN, token);
+    }
+
+    public static String authLoginFail(String account) {
+        return String.format(AUTH_LOGIN_FAIL, account);
+    }
+
+    public static String emailRateLimit(String type, String email) {
+        return String.format(EMAIL_RATE_LIMIT, type, email);
+    }
+
+    public static String emailVerifyFail(String type, String email) {
+        return String.format(EMAIL_VERIFY_FAIL, type, email);
     }
 
     private RedisKeys() {}

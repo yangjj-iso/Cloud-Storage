@@ -21,6 +21,7 @@ public interface StorageStrategy {
     /** 存储类型标识：minio / local / oss */
     String type();
 
+    /** 写入一个对象。上传分片、转码产物、缩略图等写对象场景都会走这里。 */
     PutResult put(PutRequest request);
 
     InputStream get(GetRequest request);
@@ -31,6 +32,7 @@ public interface StorageStrategy {
 
     String presignDownload(String bucket, String objectKey, Duration ttl);
 
+    /** 生成客户端直传 URL。支持后，浏览器可以绕过后端直接 PUT 到对象存储。 */
     default String presignUpload(String bucket, String objectKey, Duration ttl) {
         throw new UnsupportedOperationException("presignUpload not supported by " + type());
     }

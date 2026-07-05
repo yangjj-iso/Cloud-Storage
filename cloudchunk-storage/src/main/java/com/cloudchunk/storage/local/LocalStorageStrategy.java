@@ -21,8 +21,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -152,11 +150,8 @@ public class LocalStorageStrategy implements StorageStrategy {
 
     @Override
     public String presignDownload(String bucket, String objectKey, Duration ttl) {
-        long expireAt = System.currentTimeMillis() + ttl.toMillis();
-        String encoded = URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
-        return properties.getLocal().getBaseUrl()
-                + "/_local/" + bucket + "/" + encoded
-                + "?exp=" + expireAt;
+        throw new StorageException(ErrorCode.INVALID_PARAMETER,
+                "presignDownload not supported by local storage; use backend download endpoint");
     }
 
     @Override
@@ -171,12 +166,17 @@ public class LocalStorageStrategy implements StorageStrategy {
     @Override
     public void deleteBatch(String bucket, List<String> keys) {
         if (keys == null) return;
+        List<String> failed = new ArrayList<>();
         for (String k : keys) {
             try {
                 Files.deleteIfExists(resolve(bucket, k));
             } catch (IOException e) {
                 log.warn("delete failed (batch): {}: {}", k, e.getMessage());
+                failed.add(k);
             }
+        }
+        if (!failed.isEmpty()) {
+            throw new StorageException("deleteBatch failed: " + failed.size() + " objects");
         }
     }
 
@@ -204,18 +204,22 @@ public class LocalStorageStrategy implements StorageStrategy {
 
     @Override
     public List<ObjectStat> list(String bucket, String prefix, int maxKeys) {
-        Path base = resolve(bucket, prefix);
+        Path bucketRoot = resolve(bucket, "");
         List<ObjectStat> out = new ArrayList<>();
-        Path dir = Files.isDirectory(base) ? base : base.getParent();
-        if (dir == null || !Files.isDirectory(dir)) return out;
-        try (Stream<Path> s = Files.walk(dir)) {
+        if (!Files.isDirectory(bucketRoot)) return out;
+        String safePrefix = prefix == null ? "" : prefix.replace('\\', '/');
+        try (Stream<Path> s = Files.walk(bucketRoot)) {
             s.filter(Files::isRegularFile)
+                    .filter(p -> {
+                        String rel = bucketRoot.relativize(p).toString().replace('\\', '/');
+                        return rel.startsWith(safePrefix);
+                    })
                     .sorted(Comparator.naturalOrder())
                     .limit(maxKeys)
                     .forEach(p -> {
                         try {
                             BasicFileAttributes attrs = Files.readAttributes(p, BasicFileAttributes.class);
-                            String rel = root.resolve(bucket).relativize(p).toString().replace('\\', '/');
+                            String rel = bucketRoot.relativize(p).toString().replace('\\', '/');
                             out.add(new ObjectStat(bucket, rel, attrs.size(), null,
                                     attrs.lastModifiedTime().toInstant(),
                                     null, null));

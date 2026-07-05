@@ -60,7 +60,6 @@ export function FileDrawer() {
 
   const onDownload = async () => {
     if (!meta) {
-      window.open(downloadUrl(fileId!), '_blank');
       return;
     }
     // 优先直连 MinIO 预签名 URL，跳过后端代理，吞吐更高
@@ -71,8 +70,7 @@ export function FileDrawer() {
         dlUrl = r.url;
         setUrl(dlUrl);
       } catch {
-        window.open(downloadUrl(fileId!), '_blank');
-        return;
+        dlUrl = downloadUrl(fileId!);
       }
     }
     setDlProgress({ loaded: 0, total: meta.fileSize, percent: 0 });
@@ -83,6 +81,8 @@ export function FileDrawer() {
         fileSize: meta.fileSize,
         onProgress: setDlProgress,
       });
+    } catch (e) {
+      showToast({ kind: 'error', title: '下载失败', description: (e as Error).message });
     } finally {
       setDlProgress(null);
     }

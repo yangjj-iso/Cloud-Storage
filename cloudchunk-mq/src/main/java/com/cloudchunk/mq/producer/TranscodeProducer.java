@@ -7,6 +7,8 @@ import com.cloudchunk.common.util.IdUtils;
 import com.cloudchunk.common.util.MimeUtils;
 import com.cloudchunk.infra.redis.RedisService;
 import com.cloudchunk.mq.message.TranscodeMessage;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.slf4j.Logger;
@@ -38,6 +40,8 @@ public class TranscodeProducer {
     /**
      * @return true 表示投递成功；false 表示重复投递被幂等拦截或类型无需转码
      */
+    @CircuitBreaker(name = "mq")
+    @Retry(name = "mq")
     public boolean publish(TranscodeMessage msg) {
         String tag = MimeUtils.tag(msg.getMimeType());
         if (tag == null) {

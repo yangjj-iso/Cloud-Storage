@@ -26,5 +26,5 @@ npm run preview
 
 ## 配置
 
-- 默认用户走头部 `X-User-Id: 1`（开发态）。若需真实鉴权，改 `src/lib/api.ts` 里的 `authHeaders()`。
+- 前端会在登录后把 Bearer token 放入 `Authorization` 请求头；本地开发也需要先登录。
 - 后端地址改 `vite.config.ts` 中 `server.proxy['/api'].target`。

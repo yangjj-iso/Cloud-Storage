@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cloudchunk.core.file.mapper.FileReferenceMapper">
+
+    <insert id="insertIgnore">
+        INSERT IGNORE INTO file_reference (file_id, user_id, file_name, created_at, updated_at)
+        VALUES (#{r.fileId}, #{r.userId}, #{r.fileName}, NOW(3), NOW(3))
+    </insert>
+
+    <delete id="deleteByFileAndUser">
+        DELETE FROM file_reference
+        WHERE file_id = #{fileId}
+          AND user_id = #{userId}
+    </delete>
+
+    <delete id="deleteByFileId">
+        DELETE FROM file_reference
+        WHERE file_id = #{fileId}
+    </delete>
+
+    <select id="countByFileId" resultType="int">
+        SELECT COUNT(1)
+        FROM file_reference
+        WHERE file_id = #{fileId}
+    </select>
+
+    <select id="selectByFileId" resultType="com.cloudchunk.core.file.entity.FileReference">
+        SELECT id, file_id, user_id, file_name, created_at, updated_at
+        FROM file_reference
+        WHERE file_id = #{fileId}
+        ORDER BY id ASC
+    </select>
+
+</mapper>

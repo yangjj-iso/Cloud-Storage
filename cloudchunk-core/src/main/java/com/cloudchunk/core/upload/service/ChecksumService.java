@@ -51,6 +51,11 @@ public class ChecksumService {
             log.debug("checksum: already verified: {}", msg.getFileId());
             return;
         }
+        if (meta.getStatus() != FileStatus.MERGED) {
+            log.debug("checksum: skip non-merged status, fileId={}, status={}",
+                    msg.getFileId(), meta.getStatus());
+            return;
+        }
 
         String actual;
         try (InputStream in = storageFactory.current().get(new GetRequest(msg.getBucket(), msg.getObjectKey()))) {

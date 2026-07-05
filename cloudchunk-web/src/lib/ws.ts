@@ -1,3 +1,5 @@
+import { getStoredAuth } from './api';
+
 /**
  * 上传进度 WebSocket 客户端。
  *
@@ -20,8 +22,13 @@ export function connectUploadWs(
   onMessage: (msg: WsProgressMessage) => void,
 ): WebSocket | null {
   try {
+    const token = getStoredAuth()?.token;
+    if (!token) return null;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/ws/upload/${fileId}`);
+    const ws = new WebSocket(`${proto}//${location.host}/ws/upload/${fileId}`, [
+      'cloudchunk-upload',
+      token,
+    ]);
     ws.onmessage = (e) => {
       try {
         const data: WsProgressMessage = JSON.parse(e.data);

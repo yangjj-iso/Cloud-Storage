@@ -3,6 +3,7 @@ package com.cloudchunk.core;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
+import java.util.List;
 
 @ConfigurationProperties(prefix = "cloudchunk")
 public class CloudchunkProperties {
@@ -12,6 +13,9 @@ public class CloudchunkProperties {
     private Executor executor = new Executor();
     private RateLimit rateLimit = new RateLimit();
     private Cache cache = new Cache();
+    private Auth auth = new Auth();
+    private Smtp smtp = new Smtp();
+    private WebSocket webSocket = new WebSocket();
 
     public static class Chunk {
         private int defaultSize = 5 * 1024 * 1024;
@@ -93,6 +97,48 @@ public class CloudchunkProperties {
         public void setFileMetaTtl(Duration fileMetaTtl) { this.fileMetaTtl = fileMetaTtl; }
     }
 
+    /** 登录与会话配置 */
+    public static class Auth {
+        private Duration tokenTtl = Duration.ofDays(7);
+
+        public Duration getTokenTtl() { return tokenTtl; }
+        public void setTokenTtl(Duration tokenTtl) { this.tokenTtl = tokenTtl; }
+    }
+
+    /** 出站邮件（验证码）。enabled=false 时开发模式仅记录日志，不实际发送。 */
+    public static class Smtp {
+        private boolean enabled = false;
+        private String host = "";
+        private int port = 587;
+        private String username = "";
+        private String password = "";
+        private String from = "no-reply@cloudchunk.local";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getHost() { return host; }
+        public void setHost(String host) { this.host = host; }
+        public int getPort() { return port; }
+        public void setPort(int port) { this.port = port; }
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+        public String getPassword() { return password; }
+        public void setPassword(String password) { this.password = password; }
+        public String getFrom() { return from; }
+        public void setFrom(String from) { this.from = from; }
+    }
+
+    public static class WebSocket {
+        private List<String> allowedOrigins = List.of(
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:8080",
+                "http://127.0.0.1:8080");
+
+        public List<String> getAllowedOrigins() { return allowedOrigins; }
+        public void setAllowedOrigins(List<String> allowedOrigins) { this.allowedOrigins = allowedOrigins; }
+    }
+
     public Chunk getChunk() { return chunk; }
     public void setChunk(Chunk chunk) { this.chunk = chunk; }
     public Upload getUpload() { return upload; }
@@ -103,4 +149,10 @@ public class CloudchunkProperties {
     public void setRateLimit(RateLimit rateLimit) { this.rateLimit = rateLimit; }
     public Cache getCache() { return cache; }
     public void setCache(Cache cache) { this.cache = cache; }
+    public Auth getAuth() { return auth; }
+    public void setAuth(Auth auth) { this.auth = auth; }
+    public Smtp getSmtp() { return smtp; }
+    public void setSmtp(Smtp smtp) { this.smtp = smtp; }
+    public WebSocket getWebSocket() { return webSocket; }
+    public void setWebSocket(WebSocket webSocket) { this.webSocket = webSocket; }
 }

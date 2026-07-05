@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import type { FileMeta } from '../types';
 import { cn, formatBytes, formatDate, mimeCategory } from '../lib/utils';
 import { api, downloadUrl } from '../lib/api';
+import { downloadFile } from '../lib/download';
 import { Badge } from './ui/Badge';
 import { useAppStore } from '../store';
 
@@ -45,6 +46,7 @@ interface Props {
 export function FileCard({ file }: Props) {
   const setActive = useAppStore((s) => s.setActiveFile);
   const deleteFile = useAppStore((s) => s.deleteFile);
+  const showToast = useAppStore((s) => s.showToast);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const { Icon, color } = iconFor(file.mimeType);
   const isImage = mimeCategory(file.mimeType) === 'image';
@@ -65,11 +67,18 @@ export function FileCard({ file }: Props) {
 
   const onDownload = async () => {
     try {
-      const r = await api.fileUrl(file.fileId, 600);
-      window.open(r.url, '_blank');
-    } catch {
-      // Fallback to streaming through backend
-      window.open(downloadUrl(file.fileId), '_blank');
+      try {
+        const r = await api.fileUrl(file.fileId, 600);
+        window.open(r.url, '_blank');
+      } catch {
+        await downloadFile({
+          url: downloadUrl(file.fileId),
+          fileName: file.fileName,
+          fileSize: file.fileSize,
+        });
+      }
+    } catch (e) {
+      showToast({ kind: 'error', title: '下载失败', description: (e as Error).message });
     }
   };
 

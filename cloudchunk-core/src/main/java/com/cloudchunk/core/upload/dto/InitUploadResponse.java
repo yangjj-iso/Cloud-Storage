@@ -7,14 +7,23 @@ import java.util.List;
 
 public class InitUploadResponse {
 
+    /** 初始化结果：INSTANT 秒传、UPLOAD 新上传、RESUME 续传。 */
     private UploadMode mode;
+    /** 上传会话 ID，也是最终文件 ID；后续分片、确认、合并都用它关联。 */
     private String fileId;
+    /** 后端确认采用的分片大小。 */
     private Integer chunkSize;
+    /** 后端确认采用的分片总数。 */
     private Integer chunkTotal;
+    /** 续传时已经完成的分片下标集合。 */
     private List<Integer> uploaded;
+    /** 续传时仍需上传的分片下标集合。 */
     private List<Integer> missing;
+    /** 秒传命中时返回的下载 URL。 */
     private String url;
+    /** 兼容前端展示的状态值。 */
     private Integer status;
+    /** 上传会话过期时间，过期后不能继续写分片。 */
     private LocalDateTime expireAt;
 
     public static InitUploadResponse instant(String fileId, String url) {

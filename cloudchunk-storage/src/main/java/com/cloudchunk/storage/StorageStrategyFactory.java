@@ -2,6 +2,8 @@ package com.cloudchunk.storage;
 
 import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.exception.StorageException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -14,10 +16,15 @@ public class StorageStrategyFactory {
     private final Map<String, StorageStrategy> strategies;
     private final StorageProperties properties;
 
-    public StorageStrategyFactory(List<StorageStrategy> all, StorageProperties properties) {
+    public StorageStrategyFactory(List<StorageStrategy> all, StorageProperties properties,
+                                  CircuitBreakerRegistry circuitBreakerRegistry) {
+        // 远程对象存储（minio）用熔断器包裹，故障时快速失败防雪崩；本地磁盘策略无需熔断。
+        CircuitBreaker storageCb = circuitBreakerRegistry.circuitBreaker("storage");
         Map<String, StorageStrategy> m = new HashMap<>();
         for (StorageStrategy s : all) {
-            m.put(s.type(), s);
+            StorageStrategy effective = "minio".equals(s.type())
+                    ? new ResilientStorageStrategy(s, storageCb) : s;
+            m.put(s.type(), effective);
         }
         this.strategies = Map.copyOf(m);
         this.properties = properties;

@@ -7,9 +7,11 @@ import com.cloudchunk.common.enums.FileStatus;
 import com.cloudchunk.common.enums.TranscodeStatus;
 import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
+import com.cloudchunk.core.file.entity.FileReference;
 import com.cloudchunk.core.CloudchunkProperties;
 import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.mapper.FileMetaMapper;
+import com.cloudchunk.core.file.mapper.FileReferenceMapper;
 import com.cloudchunk.infra.redis.RedisService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -20,6 +22,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -28,13 +34,15 @@ public class FileMetaService {
     private static final Logger log = LoggerFactory.getLogger(FileMetaService.class);
 
     private final FileMetaMapper mapper;
+    private final FileReferenceMapper referenceMapper;
     private final RedisService redis;
     private final StringRedisTemplate redisTemplate;
     private final Cache<String, FileMeta> localCache;
 
-    public FileMetaService(FileMetaMapper mapper, RedisService redis,
+    public FileMetaService(FileMetaMapper mapper, FileReferenceMapper referenceMapper, RedisService redis,
                            StringRedisTemplate redisTemplate, CloudchunkProperties props) {
         this.mapper = mapper;
+        this.referenceMapper = referenceMapper;
         this.redis = redis;
         this.redisTemplate = redisTemplate;
         CloudchunkProperties.Cache c = props.getCache();
@@ -74,23 +82,93 @@ public class FileMetaService {
         return findById(fileId).orElseThrow(() -> BizException.of(ErrorCode.FILE_NOT_FOUND, fileId));
     }
 
+    public FileMeta getAccessibleOrThrow(String fileId, long userId) {
+        FileMeta m = getOrThrow(fileId);
+        if (!canAccess(m, userId)) {
+            throw BizException.of(ErrorCode.FILE_NOT_FOUND, fileId);
+        }
+        return m;
+    }
+
     public FileMeta getAvailableOrThrow(String fileId) {
         FileMeta m = getOrThrow(fileId);
         if (m.getStatus() == FileStatus.BROKEN) throw BizException.of(ErrorCode.FILE_BROKEN, fileId);
         if (m.getStatus() == FileStatus.DELETED) throw BizException.of(ErrorCode.FILE_NOT_FOUND, fileId);
+        if (m.getStatus() != FileStatus.AVAILABLE) {
+            throw BizException.of(ErrorCode.FILE_NOT_FOUND, "file not available: " + fileId);
+        }
         return m;
     }
 
-    public Optional<FileMeta> findAvailableByMd5(String md5) {
+    public FileMeta getAvailableForUserOrThrow(String fileId, long userId) {
+        FileMeta m = getAccessibleOrThrow(fileId, userId);
+        if (m.getStatus() == FileStatus.BROKEN) throw BizException.of(ErrorCode.FILE_BROKEN, fileId);
+        if (m.getStatus() == FileStatus.DELETED) throw BizException.of(ErrorCode.FILE_NOT_FOUND, fileId);
+        if (m.getStatus() != FileStatus.AVAILABLE) {
+            throw BizException.of(ErrorCode.FILE_NOT_FOUND, "file not available: " + fileId);
+        }
+        return m;
+    }
+
+    /** 批量按 fileId 查元数据（消除打包/列表场景的 N+1）。 */
+    public Map<String, FileMeta> findByFileIds(Collection<String> fileIds) {
+        Map<String, FileMeta> result = new HashMap<>();
+        if (fileIds == null || fileIds.isEmpty()) {
+            return result;
+        }
+        for (FileMeta m : mapper.selectList(new LambdaQueryWrapper<FileMeta>()
+                .in(FileMeta::getFileId, fileIds))) {
+            result.put(m.getFileId(), m);
+        }
+        return result;
+    }
+
+    public Optional<FileMeta> findReusableByMd5(String md5) {
         FileMeta m = mapper.selectOne(new LambdaQueryWrapper<FileMeta>()
                 .eq(FileMeta::getFileMd5, md5)
-                .eq(FileMeta::getStatus, FileStatus.AVAILABLE)
+                .eq(FileMeta::getStatus, FileStatus.AVAILABLE.getCode())
+                .isNull(FileMeta::getDeletedAt)
+                .orderByDesc(FileMeta::getStatus)
+                .orderByAsc(FileMeta::getCreatedAt)
                 .last("limit 1"));
         return Optional.ofNullable(m);
     }
 
+    public Optional<FileMeta> findAvailableByMd5(String md5) {
+        return findReusableByMd5(md5);
+    }
+
     public void insert(FileMeta meta) {
         mapper.insert(meta);
+    }
+
+    public boolean addReference(String fileId, long userId, String fileName) {
+        FileReference r = new FileReference();
+        r.setFileId(fileId);
+        r.setUserId(userId);
+        r.setFileName(fileName == null || fileName.isBlank() ? "file" : fileName);
+        return referenceMapper.insertIgnore(r) > 0;
+    }
+
+    public boolean removeReference(String fileId, long userId) {
+        return referenceMapper.deleteByFileAndUser(fileId, userId) > 0;
+    }
+
+    public int referenceCount(String fileId) {
+        return referenceMapper.countByFileId(fileId);
+    }
+
+    public boolean hasReference(String fileId, long userId) {
+        Long n = referenceMapper.selectCount(new LambdaQueryWrapper<FileReference>()
+                .eq(FileReference::getFileId, fileId)
+                .eq(FileReference::getUserId, userId));
+        return n != null && n > 0;
+    }
+
+    public boolean canAccess(FileMeta meta, long userId) {
+        if (meta == null) return false;
+        if (meta.getOwnerId() != null && meta.getOwnerId() == userId) return true;
+        return hasReference(meta.getFileId(), userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -133,9 +211,19 @@ public class FileMetaService {
     }
 
     public void markDeleted(String fileId) {
+        markDeleted(fileId, false);
+    }
+
+    public void markDeletedAndClearRefs(String fileId) {
+        markDeleted(fileId, true);
+    }
+
+    private void markDeleted(String fileId, boolean clearRefCount) {
         mapper.update(null, new LambdaUpdateWrapper<FileMeta>()
                 .eq(FileMeta::getFileId, fileId)
-                .set(FileMeta::getStatus, FileStatus.DELETED));
+                .set(FileMeta::getStatus, FileStatus.DELETED)
+                .set(FileMeta::getDeletedAt, LocalDateTime.now())
+                .set(clearRefCount, FileMeta::getRefCount, 0));
         invalidateCache(fileId);
     }
 
