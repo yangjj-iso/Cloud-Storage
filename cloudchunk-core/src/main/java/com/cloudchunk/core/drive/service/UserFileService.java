@@ -13,7 +13,7 @@ import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.mapper.FileReferenceMapper;
 import com.cloudchunk.core.file.service.FileMetaService;
 import com.cloudchunk.core.quota.service.QuotaService;
-import com.cloudchunk.storage.StorageStrategyFactory;
+import com.cloudchunk.contract.storage.ObjectDeletionQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -57,18 +57,18 @@ public class UserFileService {
     private final FileMetaService fileMetaService;
     private final FileReferenceMapper referenceMapper;
     private final QuotaService quotaService;
-    private final StorageStrategyFactory storageFactory;
+    private final ObjectDeletionQueue deletionQueue;
 
     public UserFileService(UserFileMapper mapper,
                            FileMetaService fileMetaService,
                            FileReferenceMapper referenceMapper,
                            QuotaService quotaService,
-                           StorageStrategyFactory storageFactory) {
+                           ObjectDeletionQueue deletionQueue) {
         this.mapper = mapper;
         this.fileMetaService = fileMetaService;
         this.referenceMapper = referenceMapper;
         this.quotaService = quotaService;
-        this.storageFactory = storageFactory;
+        this.deletionQueue = deletionQueue;
     }
 
     /* ============================ 目录/文件基础操作 ============================ */
@@ -271,8 +271,9 @@ public class UserFileService {
                 int totalEntries = countUserFileEntries(userId, n.getFileId());
                 int deletingEntries = deletingFileEntryCounts.getOrDefault(n.getFileId(), 0);
                 if (totalEntries <= deletingEntries && released.add(n.getFileId())) {
-                    quotaService.subUsed(userId, n.getFileSize() == null ? 0 : n.getFileSize());
-                    releaseFileReference(userId, n.getFileId());
+                    if (releaseFileReference(userId, n.getFileId())) {
+                        quotaService.subUsed(userId, n.getFileSize() == null ? 0 : n.getFileSize());
+                    }
                 }
             }
             mapper.delete(new LambdaQueryWrapper<UserFile>()
@@ -351,6 +352,11 @@ public class UserFileService {
         return n != null && n > 0;
     }
 
+    /** Includes recycle-bin entries; used to keep legacy delete fallback idempotent. */
+    public boolean hasAnyFileEntry(long userId, String fileId) {
+        return countUserFileEntries(userId, fileId) > 0;
+    }
+
     private int countUserFileEntries(long userId, String fileId) {
         Long n = mapper.selectCount(new LambdaQueryWrapper<UserFile>()
                 .eq(UserFile::getUserId, userId)
@@ -414,27 +420,30 @@ public class UserFileService {
                     .eq(UserFile::getIsDir, false));
         }
         referenceMapper.deleteByFileId(fileId);
-        try {
-            storageFactory.current().delete(fm.getBucket(), fm.getObjectKey());
-        } catch (Exception ex) {
-            log.warn("[Admin][GC] delete object {}/{} failed: {}", fm.getBucket(), fm.getObjectKey(), ex.getMessage());
-        }
-        fileMetaService.markDeletedAndClearRefs(fileId);
+        fileMetaService.markDeleting(fileId, true);
+        deletionQueue.enqueue(fileId, fm.getBucket(), fm.getObjectKey(), true);
     }
 
-    void releaseFileReference(long userId, String fileId) {
-        fileMetaService.removeReference(fileId, userId);
+    boolean releaseFileReference(long userId, String fileId) {
+        if (!fileMetaService.removeReference(fileId, userId)) {
+            return false;
+        }
         fileMetaService.decRefCount(fileId);
         if (fileMetaService.referenceCount(fileId) > 0) {
-            return;
+            return true;
         }
         FileMeta fm = fileMetaService.findById(fileId).orElse(null);
+        if (fm == null) return true;
+        fileMetaService.markDeleting(fileId, false);
+        deletionQueue.enqueue(fileId, fm.getBucket(), fm.getObjectKey(), true);
+        return true;
+    }
+
+    /** Compatibility path for legacy file rows that do not have drive nodes. */
+    public void scheduleDeletion(String fileId) {
+        FileMeta fm = fileMetaService.findById(fileId).orElse(null);
         if (fm == null) return;
-        try {
-            storageFactory.current().delete(fm.getBucket(), fm.getObjectKey());
-        } catch (Exception e) {
-            log.warn("[GC] delete object {}/{} failed: {}", fm.getBucket(), fm.getObjectKey(), e.getMessage());
-        }
-        fileMetaService.markDeleted(fileId);
+        fileMetaService.markDeleting(fileId, false);
+        deletionQueue.enqueue(fileId, fm.getBucket(), fm.getObjectKey(), true);
     }
 }

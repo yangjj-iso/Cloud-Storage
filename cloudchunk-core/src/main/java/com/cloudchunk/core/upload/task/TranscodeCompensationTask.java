@@ -5,15 +5,13 @@ import com.cloudchunk.common.enums.FileStatus;
 import com.cloudchunk.common.enums.TranscodeStatus;
 import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.mapper.FileMetaMapper;
-import com.cloudchunk.core.file.service.FileMetaService;
-import com.cloudchunk.mq.message.TranscodeMessage;
-import com.cloudchunk.mq.producer.TranscodeProducer;
+import com.cloudchunk.core.transcode.service.TranscodeApplicationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -22,6 +20,7 @@ import java.util.List;
  * 重新投递转码消息。这覆盖了合并成功后 MQ 发送失败导致的"遗漏转码"场景。
  */
 @Component
+@ConditionalOnProperty(name = "cloudchunk.runtime.worker-enabled", havingValue = "true", matchIfMissing = true)
 public class TranscodeCompensationTask {
 
     private static final Logger log = LoggerFactory.getLogger(TranscodeCompensationTask.class);
@@ -30,15 +29,12 @@ public class TranscodeCompensationTask {
     private static final int STALE_MINUTES = 10;
 
     private final FileMetaMapper fileMetaMapper;
-    private final FileMetaService fileMetaService;
-    private final TranscodeProducer transcodeProducer;
+    private final TranscodeApplicationService transcodeService;
 
     public TranscodeCompensationTask(FileMetaMapper fileMetaMapper,
-                                     FileMetaService fileMetaService,
-                                     TranscodeProducer transcodeProducer) {
+                                     TranscodeApplicationService transcodeService) {
         this.fileMetaMapper = fileMetaMapper;
-        this.fileMetaService = fileMetaService;
-        this.transcodeProducer = transcodeProducer;
+        this.transcodeService = transcodeService;
     }
 
     @Scheduled(fixedDelay = 300_000, initialDelay = 120_000)
@@ -56,28 +52,13 @@ public class TranscodeCompensationTask {
         log.info("transcode compensation: found {} orphan files", orphans.size());
 
         int published = 0;
-        int skipped = 0;
         for (FileMeta m : orphans) {
             try {
-                TranscodeMessage msg = new TranscodeMessage();
-                msg.setFileId(m.getFileId());
-                msg.setMimeType(m.getMimeType());
-                msg.setBucket(m.getBucket());
-                msg.setObjectKey(m.getObjectKey());
-                msg.setFileSize(m.getFileSize());
-                msg.setExpectMd5(m.getFileMd5());
-                msg.setProducedAt(Instant.now());
-                if (transcodeProducer.publish(msg)) {
-                    published++;
-                } else {
-                    fileMetaService.updateTranscodeStatus(m.getFileId(), TranscodeStatus.SKIP);
-                    skipped++;
-                }
+                if (transcodeService.requestIfMissing(m.getFileId())) published++;
             } catch (Exception e) {
                 log.warn("compensation publish failed: fileId={}", m.getFileId(), e);
             }
         }
-        log.info("transcode compensation done: {}/{} published, {} skipped (unsupported mime)",
-                published, orphans.size(), skipped);
+        log.info("transcode compensation done: {}/{} published", published, orphans.size());
     }
 }

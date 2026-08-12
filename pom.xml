@@ -29,10 +29,13 @@
         <lombok.version>1.18.34</lombok.version>
         <springdoc.version>2.6.0</springdoc.version>
         <caffeine.version>3.1.8</caffeine.version>
+        <archunit.version>1.3.0</archunit.version>
+        <testcontainers.version>1.21.3</testcontainers.version>
     </properties>
 
     <modules>
         <module>cloudchunk-common</module>
+        <module>cloudchunk-contract</module>
         <module>cloudchunk-infra</module>
         <module>cloudchunk-storage</module>
         <module>cloudchunk-mq</module>
@@ -56,6 +59,11 @@
             <dependency>
                 <groupId>com.cloudchunk</groupId>
                 <artifactId>cloudchunk-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.cloudchunk</groupId>
+                <artifactId>cloudchunk-contract</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -189,5 +197,29 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <!--
+                      集成测试跑在 package 之后，默认会用重打包后的产物。cloudchunk-boot 经
+                      spring-boot-maven-plugin repackage 之后，资源位于 BOOT-INF/classes/ 而不是根目录，
+                      于是 classpath:db/migration 解析不到任何东西，FlywayMigrationIT 会在
+                      「0 个迁移」的情况下静默通过校验。指向 target/classes 才是被测的真实类路径。
+                    -->
+                    <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>

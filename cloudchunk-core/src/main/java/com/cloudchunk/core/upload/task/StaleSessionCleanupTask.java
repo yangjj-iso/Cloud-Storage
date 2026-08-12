@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
@@ -27,6 +28,7 @@ import java.util.List;
  * 清理 Redis 进度记录和 MinIO 上的孤立分片对象，防止存储空间泄漏。
  */
 @Component
+@ConditionalOnProperty(name = "cloudchunk.runtime.worker-enabled", havingValue = "true", matchIfMissing = true)
 public class StaleSessionCleanupTask {
 
     private static final Logger log = LoggerFactory.getLogger(StaleSessionCleanupTask.class);
@@ -94,6 +96,11 @@ public class StaleSessionCleanupTask {
         for (int i = 0; i < s.getChunkTotal(); i++) {
             partKeys.add(ObjectKeyUtils.partKey(s.getFileId(), i));
         }
+        // A previous merge may have composed the target object and then failed before the DB
+        // transaction committed. An expired, non-completed session cannot own a valid target.
+        if (s.getObjectKey() != null && !s.getObjectKey().isBlank()) {
+            partKeys.add(s.getObjectKey());
+        }
         try {
             storageFactory.current().deleteBatch(s.getBucket(), partKeys);
         } catch (Exception e) {
@@ -114,7 +121,7 @@ public class StaleSessionCleanupTask {
                 // reservation 模型：释放该未完成会话所有参与者预留的配额，再删除引用。
                 long reserved = s.getFileSize() == null ? 0L : s.getFileSize();
                 for (FileReference ref : referenceMapper.selectByFileId(s.getFileId())) {
-                    quotaService.subUsed(ref.getUserId(), reserved);
+                    quotaService.releaseReservation(ref.getUserId(), reserved);
                 }
                 referenceMapper.deleteByFileId(s.getFileId());
             }

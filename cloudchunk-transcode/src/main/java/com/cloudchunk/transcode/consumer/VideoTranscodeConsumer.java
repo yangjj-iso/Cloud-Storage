@@ -2,7 +2,7 @@ package com.cloudchunk.transcode.consumer;
 
 import com.cloudchunk.common.constant.MqTopics;
 import com.cloudchunk.common.exception.TranscodeException;
-import com.cloudchunk.mq.message.TranscodeMessage;
+import com.cloudchunk.contract.event.TranscodeRequested;
 import com.cloudchunk.storage.model.GetRequest;
 import com.cloudchunk.storage.model.PutRequest;
 import com.cloudchunk.transcode.TranscodeProperties;
@@ -12,6 +12,7 @@ import org.apache.rocketmq.spring.annotation.ConsumeMode;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.io.BufferedInputStream;
 import java.io.InputStream;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 @Component
+@ConditionalOnProperty(name = "cloudchunk.runtime.worker-enabled", havingValue = "true", matchIfMissing = true)
 @RocketMQMessageListener(
         topic = MqTopics.TRANSCODE,
         selectorExpression = MqTopics.TAG_VIDEO,
@@ -37,7 +39,7 @@ public class VideoTranscodeConsumer extends AbstractTranscodeConsumer {
     protected String taskType() { return "video"; }
 
     @Override
-    protected TranscodeResult doTranscode(TranscodeMessage msg) throws Exception {
+    protected TranscodeResult doTranscode(TranscodeRequested msg) throws Exception {
         if (!ffmpeg.isAvailable()) {
             log.warn("ffmpeg not available, skip transcode: {}", msg.getFileId());
             return TranscodeResult.video().put("skipped", true).put("reason", "ffmpeg not available");

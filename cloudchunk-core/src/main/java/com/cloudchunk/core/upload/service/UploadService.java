@@ -29,12 +29,11 @@ import com.cloudchunk.core.upload.mapper.ChunkRecordMapper;
 import com.cloudchunk.core.upload.mapper.UploadSessionMapper;
 import com.cloudchunk.infra.redis.RedisLock;
 import com.cloudchunk.infra.redis.RedisService;
-import com.cloudchunk.mq.message.ChecksumMessage;
-import com.cloudchunk.mq.producer.ChecksumProducer;
 import com.cloudchunk.storage.StorageStrategy;
 import com.cloudchunk.storage.StorageStrategyFactory;
 import com.cloudchunk.storage.model.ComposeRequest;
 import com.cloudchunk.storage.model.ComposeResult;
+import com.cloudchunk.storage.model.GetRequest;
 import com.cloudchunk.storage.model.PutRequest;
 import com.cloudchunk.storage.model.PutResult;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -42,6 +41,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import io.micrometer.observation.annotation.Observed;
 
 import com.cloudchunk.storage.model.ObjectStat;
 
@@ -75,12 +76,12 @@ public class UploadService {
     private final ProgressStore progress;
     private final RedisService redis;
     private final RedisLock redisLock;
-    private final ChecksumProducer checksumProducer;
     private final CloudchunkProperties properties;
     private final MergeTransactionService mergeTx;
     private final UserFileService userFileService;
     private final BoundedVirtualThreadExecutor ioExecutor;
     private final BoundedVirtualThreadExecutor cleanupExecutor;
+    private final TransactionTemplate transactionTemplate;
 
     public UploadService(UploadSessionMapper sessionMapper,
                          ChunkRecordMapper chunkMapper,
@@ -90,12 +91,12 @@ public class UploadService {
                          ProgressStore progress,
                          RedisService redis,
                          RedisLock redisLock,
-                         ChecksumProducer checksumProducer,
                          CloudchunkProperties properties,
                          MergeTransactionService mergeTx,
                          UserFileService userFileService,
                          @Qualifier("ioExecutor") BoundedVirtualThreadExecutor ioExecutor,
-                         @Qualifier("cleanupExecutor") BoundedVirtualThreadExecutor cleanupExecutor) {
+                         @Qualifier("cleanupExecutor") BoundedVirtualThreadExecutor cleanupExecutor,
+                         TransactionTemplate transactionTemplate) {
         this.sessionMapper = sessionMapper;
         this.chunkMapper = chunkMapper;
         this.fileMetaService = fileMetaService;
@@ -104,16 +105,17 @@ public class UploadService {
         this.progress = progress;
         this.redis = redis;
         this.redisLock = redisLock;
-        this.checksumProducer = checksumProducer;
         this.properties = properties;
         this.mergeTx = mergeTx;
         this.userFileService = userFileService;
         this.ioExecutor = ioExecutor;
         this.cleanupExecutor = cleanupExecutor;
+        this.transactionTemplate = transactionTemplate;
     }
 
     /* ========================================================= init ========================================================= */
 
+    @Observed(name = "cloudchunk.upload.init", contextualName = "upload-init")
     public InitUploadResponse init(InitUploadRequest req, long userId) {
         // init 是上传会话入口，只处理元数据，不处理文件流。
         // 后续所有分片上传、确认、合并都通过这里返回的 fileId 关联同一个 UploadSession。
@@ -125,10 +127,12 @@ public class UploadService {
             throw BizException.of(ErrorCode.UPLOAD_IN_PROGRESS, req.getFileMd5());
         }
         try {
+            return transactionTemplate.execute(status -> {
             // 1. 秒传命中：只有 AVAILABLE（整文件 MD5 已校验通过）可作为复用对象。
             // MERGED 仍处于待校验状态，不能对外下载或复用。
             var instant = fileMetaService.findReusableByMd5(req.getFileMd5());
-            if (instant.isPresent()) {
+            if (instant.isPresent() && (properties.getUpload().isCrossUserDedupEnabled()
+                    || fileMetaService.canAccess(instant.get(), userId))) {
                 FileMeta m = instant.get();
                 boolean alreadyAccessible = fileMetaService.canAccess(m, userId);
                 boolean added = fileMetaService.addReference(m.getFileId(), userId, req.getFileName());
@@ -156,7 +160,11 @@ public class UploadService {
                     .eq(UploadSession::getFileSize, req.getFileSize())
                     .eq(UploadSession::getStatus, UploadSessionStatus.RUNNING)
                     .last("limit 1"));
-            if (existing != null && existing.getExpireAt().isAfter(LocalDateTime.now())) {
+            boolean mayJoinExisting = existing != null
+                    && (properties.getUpload().isCrossUserDedupEnabled()
+                        || existing.getOwnerId() == userId
+                        || fileMetaService.hasReference(existing.getFileId(), userId));
+            if (mayJoinExisting && existing.getExpireAt().isAfter(LocalDateTime.now())) {
                 // 同一份内容复用已有上传会话。即使 B 请求的 chunkSize 不同，也返回已有会话的分片计划，
                 // 前端应按 response.chunkSize/response.chunkTotal 重新切片，避免产生重复物理文件。
                 boolean alreadyParticipant = fileMetaService.hasReference(existing.getFileId(), userId);
@@ -165,7 +173,7 @@ public class UploadService {
                     boolean added = fileMetaService.addReference(existing.getFileId(), userId, req.getFileName());
                     if (added) {
                         try {
-                            quotaService.tryConsume(userId, req.getFileSize());
+                            quotaService.tryReserve(userId, req.getFileSize());
                         } catch (BizException e) {
                             fileMetaService.removeReference(existing.getFileId(), userId);
                             throw e;
@@ -180,18 +188,25 @@ public class UploadService {
 
             // 3. 全新上传 —— 准入即原子预留空间（reservation 模型：并发上传不会超配额，
             // 关闭 check-then-add 的 TOCTOU）。取消/过期时释放。
-            quotaService.tryConsume(userId, req.getFileSize());
+            quotaService.tryReserve(userId, req.getFileSize());
             UploadSession s;
             try {
                 s = createSession(req, userId);
             } catch (RuntimeException e) {
                 // 会话落库失败：回滚刚预留的配额，避免泄漏。
-                quotaService.subUsed(userId, req.getFileSize());
+                quotaService.releaseReservation(userId, req.getFileSize());
                 throw e;
             }
-            fileMetaService.addReference(s.getFileId(), userId, req.getFileName());
+            if (!fileMetaService.addReference(s.getFileId(), userId, req.getFileName())) {
+                quotaService.releaseReservation(userId, req.getFileSize());
+                sessionMapper.update(null, new LambdaUpdateWrapper<UploadSession>()
+                        .eq(UploadSession::getFileId, s.getFileId())
+                        .set(UploadSession::getStatus, UploadSessionStatus.FAILED));
+                throw new IllegalStateException("failed to register upload participant: " + s.getFileId());
+            }
             progress.init(s.getFileId(), s.getChunkTotal(), properties.getChunk().getSessionTtl());
             return InitUploadResponse.upload(s.getFileId(), s.getChunkSize(), s.getChunkTotal(), s.getExpireAt());
+            });
         } finally {
             redisLock.unlock(lockKey, token);
         }
@@ -265,6 +280,7 @@ public class UploadService {
      *       不依赖跨操作一致性。失败通过幂等重试 & progress 重建兜底。</li>
      * </ol>
      */
+    @Observed(name = "cloudchunk.upload.chunk", contextualName = "upload-chunk")
     public ChunkUploadResponse uploadChunk(String fileId, int chunkIndex, String chunkMd5,
                                            long userId,
                                            long chunkSize, InputStream data) throws IOException {
@@ -395,12 +411,14 @@ public class UploadService {
                     "chunkSize mismatch: expected=" + expectedSize + ", actual=" + stat.size());
         }
 
-        // confirmChunk 当前只记录前端传来的 chunkMd5，不重新下载对象计算 MD5。
-        // 直传路径若要强校验内容，需要额外设计异步校验或客户端携带可信校验头。
+        // 直传的字节从未流经后端，内容可信性必须在确认阶段补齐：否则错误分片要等到
+        // 合并后的整文件校验才暴露成 BROKEN，而且 chunk_record.chunk_md5 会污染分片级去重。
+        String verifiedMd5 = verifyDirectChunk(storage, s, partKey, chunkIndex, chunkMd5, stat);
+
         ChunkRecord rec = new ChunkRecord();
         rec.setFileId(fileId);
         rec.setChunkIndex(chunkIndex);
-        rec.setChunkMd5(chunkMd5 != null ? chunkMd5 : "");
+        rec.setChunkMd5(verifiedMd5);
         rec.setChunkSize((int) stat.size());
         rec.setEtag(stat.etag());
         rec.setStatus(ChunkStatus.DONE);
@@ -413,6 +431,55 @@ public class UploadService {
                     fileId, chunkIndex, stat.etag(), done, s.getChunkTotal());
         }
         return new ChunkUploadResponse(fileId, chunkIndex, stat.etag(), 1, allReady);
+    }
+
+    /**
+     * 校验直传分片的实际内容与客户端声明的 chunkMd5 一致，返回可信的 MD5。
+     * <p>
+     * S3/MinIO 对单次 PUT 写入的对象，ETag 就是对象内容的 MD5，而预签名直传正是单次 PUT，
+     * 因此常规路径可以零成本比对。分段上传或服务端加密会让 ETag 退化成不透明标识，
+     * 这时才回源流式重算。
+     */
+    private String verifyDirectChunk(StorageStrategy storage, UploadSession s, String partKey,
+                                     int chunkIndex, String chunkMd5, ObjectStat stat) {
+        if (!properties.getUpload().isVerifyDirectChunk()) {
+            return chunkMd5 == null ? "" : chunkMd5;
+        }
+        if (chunkMd5 == null || chunkMd5.isBlank()) {
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,
+                    "chunkMd5 is required to confirm a direct-uploaded chunk");
+        }
+        String actual = contentMd5FromEtag(stat.etag());
+        if (actual == null) {
+            if (!properties.getUpload().isVerifyDirectChunkByRead()) {
+                log.warn("chunk confirmed without content verification: fileId={}, idx={}, etag={}",
+                        s.getFileId(), chunkIndex, stat.etag());
+                return chunkMd5;
+            }
+            try (InputStream in = storage.get(new GetRequest(s.getBucket(), partKey))) {
+                actual = Md5Utils.md5(in);
+            } catch (IOException e) {
+                throw new IllegalStateException("read back chunk for verification failed: " + partKey, e);
+            }
+        }
+        if (!actual.equalsIgnoreCase(chunkMd5)) {
+            String rejected = actual;
+            ioExecutor.execute(() -> {
+                try { storage.delete(s.getBucket(), partKey); } catch (Exception ignored) {}
+            });
+            log.warn("direct chunk content mismatch: fileId={}, idx={}, declared={}, actual={}",
+                    s.getFileId(), chunkIndex, chunkMd5, rejected);
+            throw BizException.of(ErrorCode.CHUNK_MD5_MISMATCH,
+                    "expect=" + chunkMd5 + ", actual=" + rejected);
+        }
+        return actual;
+    }
+
+    /** ETag 可能带引号；分段上传的 ETag 形如 {@code <hex>-<parts>}，不是内容 MD5。 */
+    private static String contentMd5FromEtag(String etag) {
+        if (etag == null) return null;
+        String v = etag.trim().replace("\"", "");
+        return HEX32.matcher(v).matches() ? v : null;
     }
 
     /* ======================================================= chunk dedup ======================================================= */
@@ -447,13 +514,23 @@ public class UploadService {
                 continue;
             }
 
-            // 查找其他会话中相同 MD5 的已完成分片
+            // 查找其他会话中相同 MD5 的已完成分片。
+            // 必须限定在仍进行中的会话内：会话一旦合并成功，它的 part 对象就被异步删除了，
+            // 只剩 chunk_record 这条指向空对象的记录。没有这个条件时，随着历史记录堆积，
+            // limit 1 会几乎总是选中一条死记录导致 copy 失败，去重会静默退化成完全不生效。
             ChunkRecord existing = chunkMapper.selectOne(new LambdaQueryWrapper<ChunkRecord>()
                     .eq(ChunkRecord::getChunkMd5, md5)
                     .eq(ChunkRecord::getStatus, ChunkStatus.DONE)
                     .ne(ChunkRecord::getFileId, fileId)
+                    .exists("SELECT 1 FROM upload_session s WHERE s.file_id = chunk_record.file_id"
+                            + " AND s.status = " + UploadSessionStatus.RUNNING.getCode()
+                            + " AND s.expire_at > NOW()")
                     .last("limit 1"));
             if (existing == null) continue;
+            if (!properties.getUpload().isCrossUserDedupEnabled()
+                    && !canReuseChunkSource(existing.getFileId(), userId)) {
+                continue;
+            }
             long expectedSize = expectedChunkSize(s, idx);
             if (existing.getChunkSize() == null || existing.getChunkSize() != expectedSize) {
                 continue;
@@ -483,6 +560,14 @@ public class UploadService {
         }
         log.info("dedup result: fileId={}, checked={}, deduped={}", fileId, chunkMd5Map.size(), deduped.size());
         return deduped;
+    }
+
+    private boolean canReuseChunkSource(String sourceFileId, long userId) {
+        UploadSession source = sessionMapper.selectOne(new LambdaQueryWrapper<UploadSession>()
+                .eq(UploadSession::getFileId, sourceFileId)
+                .last("limit 1"));
+        return source != null && (source.getOwnerId() != null && source.getOwnerId() == userId
+                || fileMetaService.hasReference(sourceFileId, userId));
     }
 
     /* ========================================================= progress ========================================================= */
@@ -518,7 +603,9 @@ public class UploadService {
             log.warn("list storage for rebuild failed: {}", s.getFileId(), e);
         }
         progress.rebuild(s.getFileId(), s.getChunkTotal(), confirmed, properties.getChunk().getSessionTtl());
-        return new ArrayList<>(confirmed);
+        // 重建是并集语义：其他节点可能在重建期间又完成了几片。回读一次才是准确结果，
+        // 否则会让客户端重传其实已经上传成功的分片。
+        return progress.uploaded(s.getFileId());
     }
 
     private List<Integer> buildMissing(int total, List<Integer> uploaded) {
@@ -540,23 +627,14 @@ public class UploadService {
 
     /* ========================================================= merge ========================================================= */
 
+    @Observed(name = "cloudchunk.upload.merge", contextualName = "upload-merge")
     public MergeResult merge(String fileId, long userId) {
         requireValidFileId(fileId);
         UploadSession s = requireSession(fileId);
         requireParticipant(s, userId);
-        if (s.getStatus() == UploadSessionStatus.COMPLETED) {
-            var exists = fileMetaService.findById(fileId).orElse(null);
-            if (exists != null) {
-                return new MergeResult(fileId, exists.getStatus().name(),
-                        exists.getObjectKey(), null);
-            }
-        }
-        if (s.getStatus() != UploadSessionStatus.RUNNING && s.getStatus() != UploadSessionStatus.MERGING) {
-            throw BizException.of(ErrorCode.UPLOAD_SESSION_EXPIRED, s.getStatus().name());
-        }
-        if (s.getExpireAt() != null && s.getExpireAt().isBefore(LocalDateTime.now())) {
-            throw BizException.of(ErrorCode.UPLOAD_SESSION_EXPIRED, "expired");
-        }
+        MergeResult alreadyDone = completedResultOrNull(s);
+        if (alreadyDone != null) return alreadyDone;
+        requireMergeable(s);
 
         String lockKey = RedisKeys.uploadMergeLock(fileId);
         String token = IdUtils.uuid32();
@@ -564,9 +642,33 @@ public class UploadService {
             throw BizException.of(ErrorCode.UPLOAD_IN_PROGRESS, "merge");
         }
         try {
-            return doMerge(s);
+            // 锁内必须重新读会话。上面那份是拿锁之前的快照，另一个节点可能刚好在这期间
+            // 完成合并并释放了锁；继续用陈旧状态走下去时，进度已被清空、分片对象已被删除，
+            // 调用方会收到误导性的 CHUNK_NOT_COMPLETE，而实际上文件已经合并成功。
+            UploadSession fresh = requireSession(fileId);
+            MergeResult mergedByPeer = completedResultOrNull(fresh);
+            if (mergedByPeer != null) return mergedByPeer;
+            requireMergeable(fresh);
+            return doMerge(fresh);
         } finally {
             redisLock.unlock(lockKey, token);
+        }
+    }
+
+    /** 会话已完成且物理文件已存在时，返回幂等结果；否则返回 null 表示还需要真正合并。 */
+    private MergeResult completedResultOrNull(UploadSession s) {
+        if (s.getStatus() != UploadSessionStatus.COMPLETED) return null;
+        return fileMetaService.findById(s.getFileId())
+                .map(meta -> new MergeResult(s.getFileId(), meta.getStatus().name()))
+                .orElse(null);
+    }
+
+    private void requireMergeable(UploadSession s) {
+        if (s.getStatus() != UploadSessionStatus.RUNNING && s.getStatus() != UploadSessionStatus.MERGING) {
+            throw BizException.of(ErrorCode.UPLOAD_SESSION_EXPIRED, s.getStatus().name());
+        }
+        if (s.getExpireAt() != null && s.getExpireAt().isBefore(LocalDateTime.now())) {
+            throw BizException.of(ErrorCode.UPLOAD_SESSION_EXPIRED, "expired");
         }
     }
 
@@ -597,29 +699,32 @@ public class UploadService {
         // 事务内：插入 file_meta + 更新 session + 配额
         mergeTx.finalizeSuccess(s, storage.type());
 
-        // 投递校验消息 + 异步清理分片
-        ChecksumMessage msg = new ChecksumMessage();
-        msg.setFileId(s.getFileId());
-        msg.setBucket(s.getBucket());
-        msg.setObjectKey(s.getObjectKey());
-        msg.setExpectMd5(s.getFileMd5());
-        msg.setMimeType(s.getMimeType());
-        msg.setFileSize(s.getFileSize());
-        checksumProducer.publish(msg);
-
+        // 校验事件已与 file_meta/session 变更在同一事务写入 Outbox。
         progress.clear(s.getFileId());
-        cleanupPartsAsync(s.getBucket(), sources);
+        cleanupPartsAsync(s.getFileId(), s.getBucket(), sources);
 
         log.info("merged fileId={}, key={}, etag={}", s.getFileId(), cr.targetKey(), cr.etag());
-        return new MergeResult(s.getFileId(), FileStatus.MERGED.name(), cr.targetKey(), cr.etag());
+        return new MergeResult(s.getFileId(), FileStatus.MERGED.name());
     }
 
-    private void cleanupPartsAsync(String bucket, List<String> partKeys) {
+    /**
+     * 清理分片残留。chunk_record 与 part 对象是同一份东西的两种记录，必须同生命周期：
+     * 只删对象不删记录会在库里留下指向空对象的死指针，既让 chunk_record 无限增长，
+     * 也会污染按 MD5 检索的分片去重。
+     */
+    private void cleanupPartsAsync(String fileId, String bucket, List<String> partKeys) {
         cleanupExecutor.execute(() -> {
             try {
                 storageFactory.current().deleteBatch(bucket, partKeys);
             } catch (Exception e) {
                 log.warn("cleanup parts failed: {}", e.getMessage());
+            }
+            try {
+                chunkMapper.delete(new LambdaQueryWrapper<ChunkRecord>()
+                        .eq(ChunkRecord::getFileId, fileId));
+            } catch (Exception e) {
+                // 留在库里也不影响正确性：会话已是 COMPLETED，去重的存活会话条件会跳过它。
+                log.warn("cleanup chunk records failed: fileId={}, reason={}", fileId, e.getMessage());
             }
         });
     }
@@ -629,22 +734,36 @@ public class UploadService {
     @Transactional(rollbackFor = Exception.class)
     public void cancel(String fileId, long userId) {
         requireValidFileId(fileId);
-        UploadSession s = requireRunningSessionForUser(fileId, userId);
+        // Lock the session before touching references/quota. Cleanup uses the same session-first
+        // lock order, preventing a cancel/expiry race from releasing another reservation.
+        UploadSession s = sessionMapper.selectByFileIdForUpdate(fileId);
+        if (s == null) throw BizException.of(ErrorCode.NOT_FOUND, "upload_session:" + fileId);
+        if (s.getStatus() != UploadSessionStatus.RUNNING
+                || s.getExpireAt() != null && s.getExpireAt().isBefore(LocalDateTime.now())) {
+            throw BizException.of(ErrorCode.UPLOAD_SESSION_EXPIRED, String.valueOf(s.getStatus()));
+        }
+        requireParticipant(s, userId);
+        if (!fileMetaService.removeReference(fileId, userId)) {
+            return; // a concurrent idempotent cancellation already owns the release
+        }
         // reservation 模型：取消未完成的上传时释放该用户在 init/加入会话时预留的配额。
         // 走到这里说明会话处于 RUNNING 且该用户是参与者（持有预留）。
         long reserved = s.getFileSize() == null ? 0L : s.getFileSize();
-        quotaService.subUsed(userId, reserved);
-        fileMetaService.removeReference(fileId, userId);
+        quotaService.releaseReservation(userId, reserved);
         if (fileMetaService.referenceCount(fileId) > 0) {
             log.info("upload participant cancelled: fileId={}, user={}", fileId, userId);
             return;
         }
-        sessionMapper.update(null, new LambdaUpdateWrapper<UploadSession>()
+        int updated = sessionMapper.update(null, new LambdaUpdateWrapper<UploadSession>()
                 .eq(UploadSession::getFileId, fileId)
+                .eq(UploadSession::getStatus, UploadSessionStatus.RUNNING)
                 .set(UploadSession::getStatus, UploadSessionStatus.FAILED));
+        if (updated <= 0) {
+            throw BizException.of(ErrorCode.UPLOAD_SESSION_EXPIRED, fileId);
+        }
         progress.clear(fileId);
         // 异步清理已上传分片
-        cleanupPartsAsync(s.getBucket(), listPartsKeys(s));
+        cleanupPartsAsync(fileId, s.getBucket(), listPartsKeys(s));
         log.info("upload cancelled: {}", fileId);
     }
 
@@ -702,5 +821,4 @@ public class UploadService {
         }
     }
 
-    public StorageStrategyFactory storageFactory() { return storageFactory; }
 }

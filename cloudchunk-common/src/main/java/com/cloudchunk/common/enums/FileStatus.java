@@ -8,7 +8,8 @@ public enum FileStatus {
     MERGED(1),
     AVAILABLE(2),
     BROKEN(3),
-    DELETED(4);
+    DELETED(4),
+    DELETING(5);
 
     @EnumValue
     private final int code;

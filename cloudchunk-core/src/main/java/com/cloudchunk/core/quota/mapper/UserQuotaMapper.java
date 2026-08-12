@@ -17,4 +17,12 @@ public interface UserQuotaMapper extends BaseMapper<UserQuota> {
      * 消除“先查后加”的 TOCTOU 竞态。
      */
     int tryAddUsed(@Param("userId") Long userId, @Param("bytes") long bytes);
+
+    int tryReserve(@Param("userId") Long userId, @Param("bytes") long bytes);
+
+    int commitReservation(@Param("userId") Long userId, @Param("bytes") long bytes);
+
+    int releaseReservation(@Param("userId") Long userId, @Param("bytes") long bytes);
+
+    int setTotalAtLeastCommitted(@Param("userId") Long userId, @Param("totalBytes") long totalBytes);
 }

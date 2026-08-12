@@ -13,6 +13,7 @@ public class TranscodeRecord {
 
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+    private String eventId;
     private String fileId;
     private String taskType;
     private Integer status;
@@ -27,6 +28,8 @@ public class TranscodeRecord {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+    public String getEventId() { return eventId; }
+    public void setEventId(String eventId) { this.eventId = eventId; }
     public String getFileId() { return fileId; }
     public void setFileId(String fileId) { this.fileId = fileId; }
     public String getTaskType() { return taskType; }

@@ -12,7 +12,7 @@
 
     <update id="subUsed">
         UPDATE user_quota
-        SET used_bytes = GREATEST(used_bytes - #{bytes}, 0),
+        SET used_bytes = IF(used_bytes &gt;= #{bytes}, used_bytes - #{bytes}, 0),
             file_count = GREATEST(file_count - 1, 0)
         WHERE user_id = #{userId}
     </update>
@@ -22,7 +22,39 @@
         SET used_bytes = used_bytes + #{bytes},
             file_count = file_count + 1
         WHERE user_id = #{userId}
-          AND used_bytes + #{bytes} &lt;= total_bytes
+          AND used_bytes + reserved_bytes + #{bytes} &lt;= total_bytes
+    </update>
+
+    <update id="tryReserve">
+        UPDATE user_quota
+        SET reserved_bytes = reserved_bytes + #{bytes},
+            reserved_file_count = reserved_file_count + 1
+        WHERE user_id = #{userId}
+          AND used_bytes + reserved_bytes + #{bytes} &lt;= total_bytes
+    </update>
+
+    <update id="commitReservation">
+        UPDATE user_quota
+        SET reserved_bytes = reserved_bytes - #{bytes},
+            reserved_file_count = GREATEST(reserved_file_count - 1, 0),
+            used_bytes = used_bytes + #{bytes},
+            file_count = file_count + 1
+        WHERE user_id = #{userId}
+          AND reserved_bytes &gt;= #{bytes}
+    </update>
+
+    <update id="releaseReservation">
+        UPDATE user_quota
+        SET reserved_bytes = IF(reserved_bytes &gt;= #{bytes}, reserved_bytes - #{bytes}, 0),
+            reserved_file_count = GREATEST(reserved_file_count - 1, 0)
+        WHERE user_id = #{userId}
+    </update>
+
+    <update id="setTotalAtLeastCommitted">
+        UPDATE user_quota
+        SET total_bytes = #{totalBytes}
+        WHERE user_id = #{userId}
+          AND used_bytes + reserved_bytes &lt;= #{totalBytes}
     </update>
 
 </mapper>

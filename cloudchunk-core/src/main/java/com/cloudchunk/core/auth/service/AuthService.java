@@ -9,6 +9,7 @@ import com.cloudchunk.common.util.IdUtils;
 import com.cloudchunk.core.CloudchunkProperties;
 import com.cloudchunk.core.auth.dto.AuthResponse;
 import com.cloudchunk.core.auth.dto.AuthUserResponse;
+import com.cloudchunk.core.auth.dto.AuthenticatedPrincipal;
 import com.cloudchunk.core.auth.dto.LoginRequest;
 import com.cloudchunk.core.auth.dto.RegisterRequest;
 import com.cloudchunk.core.auth.entity.UserAccount;
@@ -106,6 +107,10 @@ public class AuthService {
     }
 
     public Optional<Long> resolveToken(String token) {
+        return resolvePrincipal(token).map(AuthenticatedPrincipal::userId);
+    }
+
+    public Optional<AuthenticatedPrincipal> resolvePrincipal(String token) {
         if (token == null || token.isBlank()) return Optional.empty();
         String userId = redis.get(RedisKeys.authToken(token));
         if (userId == null || userId.isBlank()) return Optional.empty();
@@ -117,10 +122,16 @@ public class AuthService {
                 return Optional.empty();
             }
             redis.expire(RedisKeys.authToken(token), tokenTtl());
-            return Optional.of(id);
+            return Optional.of(new AuthenticatedPrincipal(id, user.getRole()));
         } catch (NumberFormatException e) {
             return Optional.empty();
         }
+    }
+
+    public boolean isAdmin(long userId) {
+        UserAccount user = userMapper.selectById(userId);
+        return user != null && user.getStatus() != null && user.getStatus() == STATUS_ENABLED
+                && "admin".equals(user.getRole());
     }
 
     public void logout(String token) {

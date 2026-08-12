@@ -41,6 +41,14 @@ public final class RedisKeys {
     /** Pub/Sub：file_meta 缓存失效通知 channel */
     public static final String CHANNEL_CACHE_INVALIDATE = "cc:cache:invalidate:file_meta";
 
+    /**
+     * Pub/Sub：上传进度推送 channel。
+     * <p>
+     * WebSocket 连接固定在某一个 API 节点上，而分片确认请求可能落到任意节点，
+     * 所以进度必须经由该 channel 扇出到全部节点，再由持有连接的节点推给浏览器。
+     */
+    public static final String CHANNEL_UPLOAD_PROGRESS = "cc:ws:upload-progress";
+
     /** 登录态 token -> userId */
     public static final String AUTH_TOKEN = "cc:auth:token:%s";
 

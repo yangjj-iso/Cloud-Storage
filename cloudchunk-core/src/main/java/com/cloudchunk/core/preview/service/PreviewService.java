@@ -48,8 +48,7 @@ public class PreviewService {
                 fm.getTranscodeStatus() == null ? null : fm.getTranscodeStatus().name(),
                 previewType(mime),
                 thumbnailUrl,
-                "/api/v1/file/" + fm.getFileId() + "/download",
-                fm.getExtra()
+                "/api/v1/file/" + fm.getFileId() + "/download"
         );
     }
 

@@ -20,6 +20,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -167,7 +169,9 @@ public class FileMetaService {
 
     public boolean canAccess(FileMeta meta, long userId) {
         if (meta == null) return false;
-        if (meta.getOwnerId() != null && meta.getOwnerId() == userId) return true;
+        // file_reference is the access-control source of truth. owner_id is audit metadata only;
+        // treating it as a permanent grant would let a former owner regain a deleted reference
+        // without restoring quota/ref_count.
         return hasReference(meta.getFileId(), userId);
     }
 
@@ -218,6 +222,15 @@ public class FileMetaService {
         markDeleted(fileId, true);
     }
 
+    public void markDeleting(String fileId, boolean clearRefCount) {
+        mapper.update(null, new LambdaUpdateWrapper<FileMeta>()
+                .eq(FileMeta::getFileId, fileId)
+                .ne(FileMeta::getStatus, FileStatus.DELETED)
+                .set(FileMeta::getStatus, FileStatus.DELETING)
+                .set(clearRefCount, FileMeta::getRefCount, 0));
+        invalidateCache(fileId);
+    }
+
     private void markDeleted(String fileId, boolean clearRefCount) {
         mapper.update(null, new LambdaUpdateWrapper<FileMeta>()
                 .eq(FileMeta::getFileId, fileId)
@@ -225,6 +238,27 @@ public class FileMetaService {
                 .set(FileMeta::getDeletedAt, LocalDateTime.now())
                 .set(clearRefCount, FileMeta::getRefCount, 0));
         invalidateCache(fileId);
+    }
+
+    public boolean transitionTranscodeStatus(String fileId,
+                                             java.util.Collection<TranscodeStatus> expected,
+                                             TranscodeStatus target) {
+        int updated = mapper.update(null, new LambdaUpdateWrapper<FileMeta>()
+                .eq(FileMeta::getFileId, fileId)
+                .in(FileMeta::getTranscodeStatus, expected)
+                .set(FileMeta::getTranscodeStatus, target));
+        if (updated > 0) invalidateCache(fileId);
+        return updated > 0;
+    }
+
+    /** Compare-and-set state transition used by idempotent asynchronous consumers. */
+    public boolean transitionStatus(String fileId, FileStatus expected, FileStatus target) {
+        int updated = mapper.update(null, new LambdaUpdateWrapper<FileMeta>()
+                .eq(FileMeta::getFileId, fileId)
+                .eq(FileMeta::getStatus, expected)
+                .set(FileMeta::getStatus, target));
+        if (updated > 0) invalidateCache(fileId);
+        return updated > 0;
     }
 
     public void cacheUrl(String fileId, String url, Duration ttl) {
@@ -251,7 +285,32 @@ public class FileMetaService {
         }
     }
 
+    /**
+     * 失效文件元数据缓存。
+     * <p>
+     * 处在事务中时，跨节点的失效通知必须推迟到事务结束之后再发。若在提交前就广播，其他节点会
+     * 立即回源，而这时本节点的修改尚未提交，它们读到的仍是旧值并重新放进本地缓存；此后不会再有
+     * 第二次通知，旧值会一直停留到 Caffeine TTL 到期（默认 5 分钟）。典型症状是文件已经
+     * MERGED → AVAILABLE，但部分节点在几分钟内始终认为它不可下载。
+     * <p>
+     * 本地缓存则立即失效，保证同一事务内能读到自己的写入；事务回滚时 afterCompletion 会再清一次，
+     * 因此不会留下未提交数据的残影。
+     */
     private void invalidateCache(String fileId) {
+        if (localCache != null) localCache.invalidate(fileId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    publishInvalidation(fileId);
+                }
+            });
+            return;
+        }
+        publishInvalidation(fileId);
+    }
+
+    private void publishInvalidation(String fileId) {
         if (localCache != null) localCache.invalidate(fileId);
         try {
             redis.delete(RedisKeys.fileMeta(fileId));

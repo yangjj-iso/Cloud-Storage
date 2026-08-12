@@ -44,6 +44,33 @@ public class ProgressStore {
                     "return count",
             Long.class);
 
+    /**
+     * KEYS[1]=hashKey; ARGV[1]=chunkTotal; ARGV[2]=ttlSeconds; ARGV[3..]=已确认的分片索引。
+     * 返回重建后的 done count。
+     * <p>
+     * 重建必须原子完成，且只能做并集而不能覆盖：共享上传会话允许多个参与者同时上传，
+     * 一个节点在重建的同时，另一个节点可能正好 markDone 了一片。若像先前那样直接
+     * {@code HSET __count__ = confirmed.size()}，就会把并发的自增覆盖掉，导致进度永远差几片、
+     * 合并一直报 CHUNK_NOT_COMPLETE。这里用 HSETNX 合并分片位，再从实际字段重新数一遍计数。
+     */
+    private static final RedisScript<Long> REBUILD_SCRIPT = new DefaultRedisScript<>(
+            "redis.call('HSET', KEYS[1], '__total__', ARGV[1]) " +
+                    "for i = 3, #ARGV do " +
+                    "  redis.call('HSETNX', KEYS[1], ARGV[i], '1') " +
+                    "end " +
+                    "local all = redis.call('HGETALL', KEYS[1]) " +
+                    "local count = 0 " +
+                    "for i = 1, #all, 2 do " +
+                    "  local f = all[i] " +
+                    "  if f ~= '__total__' and f ~= '__count__' and all[i + 1] == '1' then " +
+                    "    count = count + 1 " +
+                    "  end " +
+                    "end " +
+                    "redis.call('HSET', KEYS[1], '__count__', count) " +
+                    "redis.call('EXPIRE', KEYS[1], ARGV[2]) " +
+                    "return count",
+            Long.class);
+
     private final RedisService redis;
 
     public ProgressStore(RedisService redis) {
@@ -118,14 +145,21 @@ public class ProgressStore {
         redis.delete(RedisKeys.uploadProgress(fileId));
     }
 
-    /** 用兜底数据（MySQL/Storage 交集）重建进度 Hash（包含计数字段） */
-    public void rebuild(String fileId, int chunkTotal, Set<Integer> confirmed, Duration ttl) {
-        String key = RedisKeys.uploadProgress(fileId);
-        redis.hSet(key, FIELD_TOTAL, String.valueOf(chunkTotal));
-        redis.hSet(key, FIELD_COUNT, String.valueOf(confirmed.size()));
-        for (Integer i : confirmed) {
-            redis.hSet(key, String.valueOf(i), "1");
+    /**
+     * 用兜底数据（MySQL/Storage 交集）重建进度 Hash，返回重建后的完成数。
+     * <p>
+     * 语义是并集而非覆盖：重建期间其他节点可能正在写入新的分片位，这些位必须保留。
+     */
+    public int rebuild(String fileId, int chunkTotal, Set<Integer> confirmed, Duration ttl) {
+        String[] args = new String[2 + confirmed.size()];
+        args[0] = String.valueOf(chunkTotal);
+        args[1] = String.valueOf(Math.max(1, ttl.toSeconds()));
+        int i = 2;
+        for (Integer index : confirmed) {
+            args[i++] = String.valueOf(index);
         }
-        redis.expire(key, ttl);
+        Long v = redis.raw().execute(REBUILD_SCRIPT,
+                List.of(RedisKeys.uploadProgress(fileId)), (Object[]) args);
+        return v == null ? 0 : v.intValue();
     }
 }

@@ -155,6 +155,21 @@ public class LocalStorageStrategy implements StorageStrategy {
     }
 
     @Override
+    public void copy(String srcBucket, String srcKey, String dstBucket, String dstKey) {
+        Path src = resolve(srcBucket, srcKey);
+        if (!Files.isRegularFile(src)) {
+            throw new StorageException(ErrorCode.FILE_NOT_FOUND, srcKey);
+        }
+        Path dst = resolve(dstBucket, dstKey);
+        try {
+            Files.createDirectories(dst.getParent());
+            Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new StorageException("copy failed: " + srcKey + " -> " + dstKey, e);
+        }
+    }
+
+    @Override
     public void delete(String bucket, String objectKey) {
         try {
             Files.deleteIfExists(resolve(bucket, objectKey));

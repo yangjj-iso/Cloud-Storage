@@ -6,9 +6,11 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.model.PageResult;
+import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.admin.dto.AdminDtos.AdminFileItem;
 import com.cloudchunk.core.admin.dto.AdminDtos.AdminUserItem;
 import com.cloudchunk.core.admin.entity.SystemSetting;
+import com.cloudchunk.core.admin.dto.SettingView;
 import com.cloudchunk.core.admin.mapper.SystemSettingMapper;
 import com.cloudchunk.core.auth.entity.UserAccount;
 import com.cloudchunk.core.auth.mapper.UserAccountMapper;
@@ -32,10 +34,17 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 管理端：用户管理、文件管理、系统设置。仅供 admin 角色调用（由 AdminAuthFilter 拦截）。
+ * 管理端：用户管理、文件管理、系统设置。
+ * <p>
+ * 授权的第一道关口是 API 安全边界（{@code /api/v1/admin/**} 要求 ROLE_ADMIN）。这里的
+ * {@link #requireAdminCaller()} 是纵深防御：任何新增的调用入口如果忘了配安全规则，
+ * 也不会把管理能力泄漏给普通用户。
  */
 @Service
 public class AdminService {
+
+    /** 账号启用状态，与 AuthService 保持一致。 */
+    private static final int STATUS_ENABLED = 1;
 
     /** 允许写入的系统设置键白名单。 */
     private static final Set<String> ALLOWED_SETTING_KEYS = Set.of(
@@ -74,9 +83,24 @@ public class AdminService {
     /** 系统设置键。 */
     public static final String KEY_DOWNLOAD_SPEED_LIMIT = "download_speed_limit";
 
+    /**
+     * 断言当前调用线程属于一个启用中的管理员账号。
+     * <p>
+     * 只用于面向请求的管理操作；启动期的内部调用（如 SettingsInitializer 读取设置）
+     * 没有用户上下文，不走这个入口。
+     */
+    private void requireAdminCaller() {
+        UserAccount caller = userMapper.selectById(UserContext.requireUserId());
+        if (caller == null || caller.getStatus() == null || caller.getStatus() != STATUS_ENABLED
+                || !"admin".equals(caller.getRole())) {
+            throw BizException.of(ErrorCode.FORBIDDEN);
+        }
+    }
+
     /* ============================ 用户管理 ============================ */
 
     public PageResult<AdminUserItem> listUsers(String keyword, long page, long size) {
+        requireAdminCaller();
         long safe = Math.min(Math.max(size, 1), 100);
         Page<UserAccount> p = new Page<>(Math.max(page, 1), safe);
         LambdaQueryWrapper<UserAccount> w = new LambdaQueryWrapper<UserAccount>()
@@ -106,6 +130,7 @@ public class AdminService {
     }
 
     public void disableUser(long userId) {
+        requireAdminCaller();
         int updated = userMapper.update(null, new LambdaUpdateWrapper<UserAccount>()
                 .eq(UserAccount::getId, userId).set(UserAccount::getStatus, 0));
         if (updated <= 0) {
@@ -114,6 +139,7 @@ public class AdminService {
     }
 
     public void enableUser(long userId) {
+        requireAdminCaller();
         int updated = userMapper.update(null, new LambdaUpdateWrapper<UserAccount>()
                 .eq(UserAccount::getId, userId).set(UserAccount::getStatus, 1));
         if (updated <= 0) {
@@ -122,6 +148,7 @@ public class AdminService {
     }
 
     public void resetUserPassword(long userId, String newPassword) {
+        requireAdminCaller();
         if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 72) {
             throw BizException.of(ErrorCode.INVALID_PARAMETER, "password length must be 8-72 characters");
         }
@@ -134,6 +161,7 @@ public class AdminService {
     }
 
     public void setUserRole(long userId, String role) {
+        requireAdminCaller();
         if (!"user".equals(role) && !"admin".equals(role)) {
             throw BizException.of(ErrorCode.INVALID_PARAMETER, "role must be 'user' or 'admin'");
         }
@@ -145,6 +173,7 @@ public class AdminService {
     }
 
     public void allocateSpace(long userId, long totalBytes) {
+        requireAdminCaller();
         if (totalBytes < 0) {
             throw BizException.of(ErrorCode.INVALID_PARAMETER, "totalBytes must be non-negative");
         }
@@ -154,6 +183,7 @@ public class AdminService {
     /* ============================ 文件管理 ============================ */
 
     public PageResult<AdminFileItem> listAllFiles(long page, long size) {
+        requireAdminCaller();
         Page<UserFile> result = userFileService.pageAllActive(page, size);
         List<Long> userIds = result.getRecords().stream().map(UserFile::getUserId).toList();
         Map<Long, String> names = new HashMap<>();
@@ -169,15 +199,22 @@ public class AdminService {
     }
 
     public void adminDeleteFile(String fileId) {
+        requireAdminCaller();
         userFileService.adminPurgeFile(fileId);
     }
 
     /** 返回文件元数据（供管理端下载设置响应头）；对象流由调用方在写响应体时懒打开。 */
     public FileMeta adminFileMeta(String fileId) {
+        requireAdminCaller();
         return fileMetaService.getAvailableOrThrow(fileId);
     }
 
-    /** 懒打开对象流，避免客户端提前断开导致的存储连接泄漏。 */
+    /**
+     * 懒打开对象流，避免客户端提前断开导致的存储连接泄漏。
+     * <p>
+     * 这里不重复鉴权：调用方在写响应体之前必须先通过 {@link #adminFileMeta(String)} 取得
+     * bucket/objectKey，而写响应体发生在过滤器清理用户上下文之后，此处已经读不到调用者身份。
+     */
     public InputStream openObject(String bucket, String objectKey) {
         return storageFactory.current().get(new GetRequest(bucket, objectKey));
     }
@@ -188,29 +225,35 @@ public class AdminService {
         return settingMapper.selectList(null);
     }
 
+    public List<SettingView> getSettingViews() {
+        requireAdminCaller();
+        return getAllSettings().stream().map(SettingView::from).toList();
+    }
+
     public String getSetting(String key) {
         SystemSetting s = settingMapper.selectOne(new LambdaQueryWrapper<SystemSetting>()
-                .eq(SystemSetting::getKey, key));
-        return s == null ? null : s.getValue();
+                .eq(SystemSetting::getSettingKey, key));
+        return s == null ? null : s.getSettingValue();
     }
 
     public void setSetting(String key, String value, long userId) {
+        requireAdminCaller();
         if (!ALLOWED_SETTING_KEYS.contains(key)) {
             throw BizException.of(ErrorCode.INVALID_PARAMETER, "unknown setting key");
         }
         validateSettingValue(key, value);
         SystemSetting existing = settingMapper.selectOne(new LambdaQueryWrapper<SystemSetting>()
-                .eq(SystemSetting::getKey, key));
+                .eq(SystemSetting::getSettingKey, key));
         if (existing == null) {
             SystemSetting s = new SystemSetting();
-            s.setKey(key);
-            s.setValue(value);
+            s.setSettingKey(key);
+            s.setSettingValue(value);
             s.setUpdatedBy(userId);
             settingMapper.insert(s);
         } else {
             settingMapper.update(null, new LambdaUpdateWrapper<SystemSetting>()
-                    .eq(SystemSetting::getKey, key)
-                    .set(SystemSetting::getValue, value)
+                    .eq(SystemSetting::getSettingKey, key)
+                    .set(SystemSetting::getSettingValue, value)
                     .set(SystemSetting::getUpdatedBy, userId));
         }
         // 热更新：下载限速设置立即生效，无需重启。

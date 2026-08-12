@@ -1,20 +1,13 @@
 package com.cloudchunk.api.controller;
 
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.cloudchunk.common.exception.BizException;
-import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.model.PageResult;
 import com.cloudchunk.common.model.R;
+import com.cloudchunk.common.exception.BizException;
+import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.download.service.DownloadService;
-import com.cloudchunk.core.drive.service.UserFileService;
-import com.cloudchunk.core.file.entity.FileMeta;
-import com.cloudchunk.core.file.mapper.FileMetaMapper;
-import com.cloudchunk.core.file.service.FileMetaService;
-import com.cloudchunk.core.quota.service.QuotaService;
-import com.cloudchunk.storage.StorageStrategyFactory;
-import com.cloudchunk.storage.model.GetRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import com.cloudchunk.core.file.dto.FileView;
+import com.cloudchunk.core.file.service.FileApplicationService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -28,9 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -40,26 +31,9 @@ import java.util.Map;
 @RequestMapping("/api/v1/file")
 public class FileController {
 
-    private final FileMetaService fileMetaService;
-    private final DownloadService downloadService;
-    private final FileMetaMapper fileMetaMapper;
-    private final QuotaService quotaService;
-    private final StorageStrategyFactory storageFactory;
-    private final UserFileService userFileService;
+    private final FileApplicationService fileService;
 
-    public FileController(FileMetaService fileMetaService,
-                          DownloadService downloadService,
-                          FileMetaMapper fileMetaMapper,
-                          QuotaService quotaService,
-                          StorageStrategyFactory storageFactory,
-                          UserFileService userFileService) {
-        this.fileMetaService = fileMetaService;
-        this.downloadService = downloadService;
-        this.fileMetaMapper = fileMetaMapper;
-        this.quotaService = quotaService;
-        this.storageFactory = storageFactory;
-        this.userFileService = userFileService;
-    }
+    public FileController(FileApplicationService fileService) { this.fileService = fileService; }
 
     /**
      * 缩略图（转码产物）。file_meta.thumbnail_url 保存的是同桶对象 key，这里鉴权后流式回源。
@@ -67,19 +41,13 @@ public class FileController {
     @GetMapping("/{fileId}/thumbnail")
     public ResponseEntity<StreamingResponseBody> thumbnail(@PathVariable String fileId) {
         long userId = UserContext.requireUserId();
-        FileMeta meta = fileMetaService.getAvailableForUserOrThrow(fileId, userId);
-        requireActiveEntry(fileId, userId);
-        String key = meta.getThumbnailUrl();
-        if (key == null || key.isBlank()) {
-            throw BizException.of(ErrorCode.FILE_NOT_FOUND, "no thumbnail");
-        }
-        String bucket = meta.getBucket();
+        FileApplicationService.ThumbnailStream thumbnail = fileService.thumbnail(fileId, userId);
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.CONTENT_TYPE, MediaType.IMAGE_JPEG_VALUE);
         headers.set(HttpHeaders.CACHE_CONTROL, "private, max-age=86400");
         // 懒打开：只有真正开始写响应体时才回源，避免客户端提前断开导致对象流泄漏。
         StreamingResponseBody body = out -> {
-            try (InputStream s = storageFactory.current().get(new GetRequest(bucket, key))) {
+            try (InputStream s = thumbnail.opener().open()) {
                 s.transferTo(out);
                 out.flush();
             }
@@ -88,10 +56,9 @@ public class FileController {
     }
 
     @GetMapping("/{fileId}")
-    public R<FileMeta> get(@PathVariable String fileId) {
+    public R<FileView> get(@PathVariable String fileId) {
         long userId = UserContext.requireUserId();
-        requireActiveEntry(fileId, userId);
-        return R.ok(fileMetaService.getAccessibleOrThrow(fileId, userId));
+        return R.ok(fileService.get(fileId, userId));
     }
 
     @GetMapping("/{fileId}/url")
@@ -101,7 +68,7 @@ public class FileController {
             throw BizException.of(ErrorCode.INVALID_PARAMETER, "ttlSeconds must be between 1 and 3600");
         }
         long userId = UserContext.requireUserId();
-        DownloadService.PresignedUrl u = downloadService.presign(fileId, Duration.ofSeconds(ttlSeconds), userId);
+        DownloadService.PresignedUrl u = fileService.presign(fileId, Duration.ofSeconds(ttlSeconds), userId);
         return R.ok(Map.of("url", u.url(),
                 "expireInSeconds", u.ttl() == null ? ttlSeconds : u.ttl().toSeconds()));
     }
@@ -127,23 +94,23 @@ public class FileController {
 
         // --- meta lookup (later will hit Caffeine cache) ---
         long userId = UserContext.requireUserId();
-        FileMeta meta = fileMetaService.getAvailableForUserOrThrow(fileId, userId);
-        requireActiveEntry(fileId, userId);
+        FileApplicationService.DownloadDescriptor descriptor = fileService.openDownload(fileId, range, userId);
+        FileView meta = descriptor.file();
 
         // --- ETag 304 ---
-        String etag = "\"" + meta.getFileMd5() + "\"";
+        String etag = "\"" + meta.fileMd5() + "\"";
         if (etag.equals(ifNoneMatch)) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
                     .eTag(etag)
                     .build();
         }
 
-        DownloadService.DownloadStream ds = downloadService.open(fileId, range, userId);
+        DownloadService.DownloadStream ds = descriptor.stream();
         long length = ds.end() - ds.start() + 1;
-        String contentType = meta.getMimeType() == null
-                ? MediaType.APPLICATION_OCTET_STREAM_VALUE : meta.getMimeType();
+        String contentType = meta.mimeType() == null
+                ? MediaType.APPLICATION_OCTET_STREAM_VALUE : meta.mimeType();
         String disposition = "attachment; filename*=UTF-8''"
-                + URLEncoder.encode(meta.getFileName(), StandardCharsets.UTF_8);
+                + URLEncoder.encode(meta.fileName(), StandardCharsets.UTF_8);
 
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.ACCEPT_RANGES, "bytes");
@@ -178,45 +145,17 @@ public class FileController {
     @DeleteMapping("/{fileId}")
     public R<Map<String, Object>> delete(@PathVariable String fileId) {
         long userId = UserContext.requireUserId();
-        int recycled = userFileService.recycleByFileId(userId, fileId);
-        if (recycled > 0) {
-            return R.ok(Map.of("fileId", fileId, "recycled", true, "deleted", false));
-        }
-
-        // 兼容早期没有 user_file 目录树的旧数据。
-        FileMeta before = fileMetaService.getAccessibleOrThrow(fileId, userId);
-        boolean removed = fileMetaService.removeReference(fileId, userId);
-        if (!removed && before.getOwnerId() != null && before.getOwnerId() == userId) {
-            removed = true; // 兼容旧数据：没有 file_reference，但 ownerId 是当前用户。
-        }
-        if (removed) {
-            fileMetaService.decRefCount(fileId);
-            quotaService.subUsed(userId, before.getFileSize());
-        }
-        FileMeta meta = fileMetaService.getOrThrow(fileId);
-        boolean actuallyDeleted = meta.getRefCount() != null && meta.getRefCount() <= 0;
-        if (actuallyDeleted) {
-            fileMetaService.markDeleted(fileId);
-        }
-        return R.ok(Map.of("fileId", fileId, "deleted", actuallyDeleted));
+        var result = fileService.delete(fileId, userId);
+        return R.ok(Map.of("fileId", result.fileId(), "recycled", result.recycled(), "deleted", result.deleted()));
     }
 
     @GetMapping
-    public R<PageResult<FileMeta>> list(@RequestParam(defaultValue = "1") long page,
+    public R<PageResult<FileView>> list(@RequestParam(defaultValue = "1") long page,
                                         @RequestParam(defaultValue = "20") long size,
                                         @RequestParam(required = false) String mimePrefix,
                                         @RequestParam(required = false) String keyword) {
         long userId = UserContext.requireUserId();
-        long safeSize = Math.min(Math.max(size, 1), 100);
-
-        Page<FileMeta> p = new Page<>(Math.max(page, 1), safeSize);
-        Page<FileMeta> result = fileMetaMapper.selectActiveUserFilePage(
-                p,
-                userId,
-                normalizeFilter(mimePrefix),
-                normalizeFilter(keyword),
-                com.cloudchunk.common.enums.FileStatus.DELETED.getCode());
-        return R.ok(new PageResult<>(result.getTotal(), result.getCurrent(), result.getSize(), result.getRecords()));
+        return R.ok(fileService.list(page, size, mimePrefix, keyword, userId));
     }
 
     /** 兜底响应：把常见 status 封装便于前端展示 */
@@ -224,13 +163,4 @@ public class FileController {
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body("not implemented");
     }
 
-    private void requireActiveEntry(String fileId, long userId) {
-        if (!userFileService.hasActiveFileEntry(userId, fileId)) {
-            throw BizException.of(ErrorCode.FILE_NOT_FOUND, fileId);
-        }
-    }
-
-    private String normalizeFilter(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
-    }
 }

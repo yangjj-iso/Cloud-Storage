@@ -12,7 +12,6 @@ public record PreviewResult(
         String transcodeStatus,
         String previewType,
         String thumbnailUrl,
-        String downloadUrl,
-        String extra
+        String downloadUrl
 ) {
 }

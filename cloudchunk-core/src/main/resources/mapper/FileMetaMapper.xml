@@ -20,7 +20,7 @@
     <select id="selectActiveUserFilePage" resultType="com.cloudchunk.core.file.entity.FileMeta">
         SELECT fm.*
         FROM file_meta fm
-        WHERE fm.status != #{deletedStatus}
+        WHERE fm.status = #{availableStatus}
           AND fm.deleted_at IS NULL
           AND EXISTS (
               SELECT 1

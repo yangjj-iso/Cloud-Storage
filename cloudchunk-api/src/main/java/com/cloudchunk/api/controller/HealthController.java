@@ -1,7 +1,7 @@
 package com.cloudchunk.api.controller;
 
 import com.cloudchunk.common.model.R;
-import com.cloudchunk.storage.StorageStrategyFactory;
+import com.cloudchunk.core.system.RuntimeInfoService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -12,18 +12,14 @@ import java.util.Map;
 @RequestMapping("/api/v1")
 public class HealthController {
 
-    private final StorageStrategyFactory storageFactory;
+    private final RuntimeInfoService runtimeInfoService;
 
-    public HealthController(StorageStrategyFactory storageFactory) {
-        this.storageFactory = storageFactory;
+    public HealthController(RuntimeInfoService runtimeInfoService) {
+        this.runtimeInfoService = runtimeInfoService;
     }
 
     @GetMapping("/ping")
     public R<Map<String, Object>> ping() {
-        return R.ok(Map.of(
-                "status", "UP",
-                "storage", storageFactory.current().type(),
-                "bucket", storageFactory.defaultBucket()
-        ));
+        return R.ok(runtimeInfoService.ping());
     }
 }

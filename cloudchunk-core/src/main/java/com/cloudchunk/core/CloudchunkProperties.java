@@ -36,11 +36,35 @@ public class CloudchunkProperties {
     public static class Upload {
         private int md5VerifyThreadPool = 4;
         private boolean autoMerge = true;
+        /** Cross-account hash-only instant upload is unsafe without proof of possession. */
+        private boolean crossUserDedupEnabled = false;
+        /**
+         * 预签名直传确认时校验分片内容。关闭后 chunk_record.chunk_md5 只是客户端声明值，
+         * 分片级去重会因此变得不可信。
+         */
+        private boolean verifyDirectChunk = true;
+        /**
+         * ETag 不能当作内容 MD5 时（分段上传 / 服务端加密），是否回源流式重算分片 MD5。
+         * 关闭则这类分片只做大小校验并记录告警。
+         */
+        private boolean verifyDirectChunkByRead = true;
 
         public int getMd5VerifyThreadPool() { return md5VerifyThreadPool; }
         public void setMd5VerifyThreadPool(int md5VerifyThreadPool) { this.md5VerifyThreadPool = md5VerifyThreadPool; }
         public boolean isAutoMerge() { return autoMerge; }
         public void setAutoMerge(boolean autoMerge) { this.autoMerge = autoMerge; }
+        public boolean isCrossUserDedupEnabled() { return crossUserDedupEnabled; }
+        public void setCrossUserDedupEnabled(boolean crossUserDedupEnabled) {
+            this.crossUserDedupEnabled = crossUserDedupEnabled;
+        }
+        public boolean isVerifyDirectChunk() { return verifyDirectChunk; }
+        public void setVerifyDirectChunk(boolean verifyDirectChunk) {
+            this.verifyDirectChunk = verifyDirectChunk;
+        }
+        public boolean isVerifyDirectChunkByRead() { return verifyDirectChunkByRead; }
+        public void setVerifyDirectChunkByRead(boolean verifyDirectChunkByRead) {
+            this.verifyDirectChunkByRead = verifyDirectChunkByRead;
+        }
     }
 
     /** 后台执行器容量：对外部系统（MinIO / MQ / DB）的并发上限 */

@@ -8,7 +8,8 @@ public enum TranscodeStatus {
     RUNNING(1),
     SUCCESS(2),
     FAILED(3),
-    SKIP(4);
+    SKIP(4),
+    QUEUED(5);
 
     @EnumValue
     private final int code;

@@ -19,5 +19,5 @@ public interface FileMetaMapper extends BaseMapper<FileMeta> {
                                             @Param("userId") long userId,
                                             @Param("mimePrefix") String mimePrefix,
                                             @Param("keyword") String keyword,
-                                            @Param("deletedStatus") int deletedStatus);
+                                            @Param("availableStatus") int availableStatus);
 }

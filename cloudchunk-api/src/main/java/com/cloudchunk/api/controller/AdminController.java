@@ -11,7 +11,7 @@ import com.cloudchunk.core.admin.dto.AdminDtos.AdminUserItem;
 import com.cloudchunk.core.admin.dto.AdminDtos.ResetPasswordRequest;
 import com.cloudchunk.core.admin.dto.AdminDtos.SetRoleRequest;
 import com.cloudchunk.core.admin.dto.AdminDtos.SetSettingRequest;
-import com.cloudchunk.core.admin.entity.SystemSetting;
+import com.cloudchunk.core.admin.dto.SettingView;
 import com.cloudchunk.core.admin.service.AdminService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -34,7 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 管理端 API（需 admin 角色，由 AdminAuthFilter 拦截）。
+ * 管理端 API（需 ADMIN 角色，由 Spring Security 统一授权）。
  */
 @RestController
 @RequestMapping("/api/v1/admin")
@@ -131,8 +131,8 @@ public class AdminController {
     /* -------- 系统设置 -------- */
 
     @GetMapping("/settings")
-    public R<List<SystemSetting>> getSettings() {
-        return R.ok(adminService.getAllSettings());
+    public R<List<SettingView>> getSettings() {
+        return R.ok(adminService.getSettingViews());
     }
 
     @PostMapping("/settings")

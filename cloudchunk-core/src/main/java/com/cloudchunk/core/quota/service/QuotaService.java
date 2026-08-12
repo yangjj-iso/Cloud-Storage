@@ -1,6 +1,5 @@
 package com.cloudchunk.core.quota.service;
 
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.core.quota.entity.UserQuota;
@@ -26,6 +25,8 @@ public class QuotaService {
             q.setTotalBytes(100L * 1024 * 1024 * 1024); // 默认 100GB
             q.setUsedBytes(0L);
             q.setFileCount(0);
+            q.setReservedBytes(0L);
+            q.setReservedFileCount(0);
             try {
                 mapper.insert(q);
             } catch (Exception ignored) {
@@ -39,19 +40,25 @@ public class QuotaService {
     public void checkCapacityOrThrow(long userId, long incrementBytes) {
         UserQuota q = getOrDefault(userId);
         long used = Optional.ofNullable(q.getUsedBytes()).orElse(0L);
+        long reserved = Optional.ofNullable(q.getReservedBytes()).orElse(0L);
         long total = Optional.ofNullable(q.getTotalBytes()).orElse(Long.MAX_VALUE);
-        if (used + incrementBytes > total) {
+        if (used + reserved + incrementBytes > total) {
             throw BizException.of(ErrorCode.QUOTA_EXCEEDED,
-                    "used=" + used + ", need=" + incrementBytes + ", total=" + total);
+                    "used=" + used + ", reserved=" + reserved
+                            + ", need=" + incrementBytes + ", total=" + total);
         }
     }
 
     /** 管理端分配总空间（幂等确保配额行存在后更新 total_bytes）。 */
     public void allocateSpace(long userId, long totalBytes) {
+        if (totalBytes < 0) {
+            throw BizException.of(ErrorCode.INVALID_PARAMETER, "totalBytes must be non-negative");
+        }
         getOrDefault(userId);
-        mapper.update(null, new LambdaUpdateWrapper<UserQuota>()
-                .eq(UserQuota::getUserId, userId)
-                .set(UserQuota::getTotalBytes, totalBytes));
+        if (mapper.setTotalAtLeastCommitted(userId, totalBytes) <= 0) {
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,
+                    "totalBytes cannot be lower than used and reserved bytes");
+        }
     }
 
     public void addUsed(long userId, long bytes) {
@@ -63,10 +70,8 @@ public class QuotaService {
     }
 
     /**
-     * 原子预留容量（reservation 模型）：仅当预留后不超过 total_bytes 时才增加
-     * used_bytes/file_count，从根本上消除 checkCapacity + addUsed 的“先查后加”
-     * TOCTOU 竞态。容量不足抛 {@link ErrorCode#QUOTA_EXCEEDED}。取消/过期时用
-     * {@link #subUsed} 释放。
+     * 对无需上传的秒传/分享保存直接原子记入已用容量。未完成上传应使用
+     * {@link #tryReserve(long, long)}，从而避免 checkCapacity + addUsed 的 TOCTOU 竞态。
      */
     public void tryConsume(long userId, long bytes) {
         if (bytes <= 0) {
@@ -77,5 +82,25 @@ public class QuotaService {
         if (affected <= 0) {
             throw BizException.of(ErrorCode.QUOTA_EXCEEDED, "need=" + bytes);
         }
+    }
+
+    public void tryReserve(long userId, long bytes) {
+        if (bytes <= 0) return;
+        getOrDefault(userId);
+        if (mapper.tryReserve(userId, bytes) <= 0) {
+            throw BizException.of(ErrorCode.QUOTA_EXCEEDED, "need=" + bytes);
+        }
+    }
+
+    public void commitReservation(long userId, long bytes) {
+        if (bytes <= 0) return;
+        if (mapper.commitReservation(userId, bytes) <= 0) {
+            throw new IllegalStateException("quota reservation missing for user=" + userId + ", bytes=" + bytes);
+        }
+    }
+
+    public void releaseReservation(long userId, long bytes) {
+        if (bytes <= 0) return;
+        mapper.releaseReservation(userId, bytes);
     }
 }

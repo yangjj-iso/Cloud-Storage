@@ -20,7 +20,9 @@ public final class MqTopics {
     public static final String CG_CHECKSUM        = "CG-checksum";
     public static final String CG_BROKEN_NOTIFY   = "CG-broken-notify";
 
-    public static final String CG_TRANSCODE_DLQ  = "CG-transcode-dlq";
+    public static final String CG_TRANSCODE_IMG_DLQ   = "CG-transcode-img-dlq";
+    public static final String CG_TRANSCODE_VIDEO_DLQ = "CG-transcode-video-dlq";
+    public static final String CG_TRANSCODE_DOC_DLQ   = "CG-transcode-doc-dlq";
 
     /** RocketMQ DLQ topic 命名规则：%DLQ% + 原 ConsumerGroup */
     public static final String DLQ_TRANSCODE_IMG   = "%DLQ%" + CG_TRANSCODE_IMG;

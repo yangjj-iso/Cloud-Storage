@@ -2,17 +2,19 @@ package com.cloudchunk.transcode.consumer;
 
 import com.cloudchunk.common.constant.MqTopics;
 import com.cloudchunk.common.exception.TranscodeException;
-import com.cloudchunk.mq.message.TranscodeMessage;
+import com.cloudchunk.contract.event.TranscodeRequested;
 import com.cloudchunk.storage.model.GetRequest;
 import com.cloudchunk.transcode.TranscodeResult;
 import org.apache.rocketmq.spring.annotation.ConsumeMode;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.tika.Tika;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.io.InputStream;
 
 @Component
+@ConditionalOnProperty(name = "cloudchunk.runtime.worker-enabled", havingValue = "true", matchIfMissing = true)
 @RocketMQMessageListener(
         topic = MqTopics.TRANSCODE,
         selectorExpression = MqTopics.TAG_DOC,
@@ -29,7 +31,7 @@ public class DocTranscodeConsumer extends AbstractTranscodeConsumer {
     protected String taskType() { return "doc"; }
 
     @Override
-    protected TranscodeResult doTranscode(TranscodeMessage msg) throws Exception {
+    protected TranscodeResult doTranscode(TranscodeRequested msg) throws Exception {
         Tika tika = new Tika();
         tika.setMaxStringLength(MAX_EXTRACT_CHARS);
         String text;
