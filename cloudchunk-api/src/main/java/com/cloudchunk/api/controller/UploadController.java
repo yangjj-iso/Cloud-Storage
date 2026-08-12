@@ -1,6 +1,6 @@
 package com.cloudchunk.api.controller;
 
-import com.cloudchunk.api.ws.UploadProgressHandler;
+import com.cloudchunk.api.ws.UploadProgressBroadcaster;
 import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.model.R;
@@ -14,6 +14,8 @@ import com.cloudchunk.core.upload.dto.UploadProgress;
 import com.cloudchunk.core.upload.service.UploadService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,12 +34,14 @@ import java.io.InputStream;
 @RequestMapping("/api/v1/upload")
 public class UploadController {
 
+    private static final Logger log = LoggerFactory.getLogger(UploadController.class);
+
     private final UploadService uploadService;
     private final CloudchunkProperties properties;
-    private final UploadProgressHandler wsProgress;
+    private final UploadProgressBroadcaster wsProgress;
 
     public UploadController(UploadService uploadService, CloudchunkProperties properties,
-                            UploadProgressHandler wsProgress) {
+                            UploadProgressBroadcaster wsProgress) {
         this.uploadService = uploadService;
         this.properties = properties;
         this.wsProgress = wsProgress;
@@ -158,15 +162,24 @@ public class UploadController {
     }
 
     private void autoMergeIfReady(String fileId, ChunkUploadResponse resp, long userId) {
-        // WebSocket 实时推送分片进度
+        // 经 Redis 扇出推送分片进度：WebSocket 连接不一定在当前节点上。
         wsProgress.broadcast(fileId, resp);
         if (resp.isAllReady() && properties.getUpload().isAutoMerge()) {
             try {
                 // 最后一片完成后可自动合并。
                 // 合并失败不影响当前分片响应，前端仍可显式调用 /merge/{fileId} 重试。
                 uploadService.merge(fileId, userId);
+            } catch (BizException e) {
+                // 并发确认时多个请求都可能看到"分片已齐"，但只有一个能拿到合并锁，
+                // 其余收到 UPLOAD_IN_PROGRESS 属于预期竞争，不是故障。
+                if (e.getErrorCode() == ErrorCode.UPLOAD_IN_PROGRESS) {
+                    log.debug("auto-merge skipped, another merge holds the lock: fileId={}", fileId);
+                } else {
+                    log.warn("auto-merge failed: fileId={}, code={}", fileId, e.getErrorCode(), e);
+                }
             } catch (Exception e) {
-                // 合并失败不影响分片上传响应；前端可通过 /merge 重试
+                // 静默吞掉会让合并故障完全不可见，只能等用户报"文件一直不出现"。
+                log.warn("auto-merge failed: fileId={}", fileId, e);
             }
         }
     }
