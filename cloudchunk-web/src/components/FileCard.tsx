@@ -1,169 +1,90 @@
-import {
-  FileArchive,
-  FileText,
-  FileImage,
-  FileVideo,
-  Music,
-  MoreHorizontal,
-  Download,
-  Trash2,
-  Info,
-} from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import type { FileMeta } from '../types';
-import { cn, formatBytes, formatDate, mimeCategory } from '../lib/utils';
-import { api, downloadUrl } from '../lib/api';
+import { cn, formatBytes, mimeCategory } from '../lib/utils';
+import { api, downloadUrl, getAuthHeader } from '../lib/api';
+import { formatZhDate } from '../lib/locale';
 import { downloadFile } from '../lib/download';
-import { Badge } from './ui/Badge';
 import { useAppStore } from '../store';
+import { MaterialIcon } from './ui/MaterialIcon';
 
-function iconFor(mime: string) {
-  const cat = mimeCategory(mime);
-  if (cat === 'image') return { Icon: FileImage, color: 'from-fuchsia-500 to-pink-500' };
-  if (cat === 'video') return { Icon: FileVideo, color: 'from-sky-500 to-indigo-500' };
-  if (cat === 'audio') return { Icon: Music, color: 'from-amber-400 to-orange-500' };
-  if (cat === 'archive') return { Icon: FileArchive, color: 'from-orange-400 to-red-500' };
-  if (cat === 'doc') return { Icon: FileText, color: 'from-emerald-400 to-teal-500' };
-  return { Icon: FileText, color: 'from-slate-400 to-slate-500' };
-}
-
-function transcodeBadge(status: string) {
-  if (status === 'SUCCESS')
-    return <Badge tone="success">转码完成</Badge>;
-  if (status === 'RUNNING')
-    return <Badge tone="info">转码中</Badge>;
-  if (status === 'PENDING')
-    return <Badge tone="neutral">排队</Badge>;
-  if (status === 'FAILED')
-    return <Badge tone="danger">转码失败</Badge>;
-  return null;
-}
-
-interface Props {
-  file: FileMeta;
-}
-
-export function FileCard({ file }: Props) {
+export function FileCard({ file }: { file: FileMeta }) {
   const setActive = useAppStore((s) => s.setActiveFile);
   const deleteFile = useAppStore((s) => s.deleteFile);
   const showToast = useAppStore((s) => s.showToast);
-  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
-  const { Icon, color } = iconFor(file.mimeType);
-  const isImage = mimeCategory(file.mimeType) === 'image';
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const category = mimeCategory(file.mimeType);
+  const appearance = fileAppearance(file.fileName, category);
+  const isPreviewable = category === 'image' || category === 'video';
 
   useEffect(() => {
+    if (category !== 'image' && !file.thumbnailUrl) return;
+    setThumbnail(null);
     let cancelled = false;
-    if (!isImage) return;
-    api
-      .fileUrl(file.fileId, 900)
-      .then((r) => {
-        if (!cancelled) setThumbUrl(r.url);
-      })
-      .catch(() => void 0);
-    return () => {
-      cancelled = true;
-    };
-  }, [file.fileId, isImage]);
+    let objectUrl = '';
+    const load = file.thumbnailUrl
+      ? fetch(file.thumbnailUrl, { headers: getAuthHeader() }).then(async (response) => {
+          if (!response.ok) throw new Error('缩略图加载失败');
+          objectUrl = URL.createObjectURL(await response.blob());
+          return objectUrl;
+        })
+      : api.fileUrl(file.fileId, 900).then((result) => result.url);
+    load.then((result) => { if (!cancelled) setThumbnail(result); }).catch(() => void 0);
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [category, file.fileId, file.thumbnailUrl]);
 
-  const onDownload = async () => {
+  const onDownload = async (event: MouseEvent) => {
+    event.stopPropagation();
     try {
-      try {
-        const r = await api.fileUrl(file.fileId, 600);
-        window.open(r.url, '_blank');
-      } catch {
-        await downloadFile({
-          url: downloadUrl(file.fileId),
-          fileName: file.fileName,
-          fileSize: file.fileSize,
-        });
-      }
-    } catch (e) {
-      showToast({ kind: 'error', title: '下载失败', description: (e as Error).message });
+      const result = await api.fileUrl(file.fileId, 600).catch(() => null);
+      if (result?.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+      else await downloadFile({ url: downloadUrl(file.fileId), fileName: file.fileName, fileSize: file.fileSize });
+    } catch (reason) {
+      showToast({ kind: 'error', title: '下载失败', description: (reason as Error).message });
     }
   };
 
-  const onDelete = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm(`确定删除 "${file.fileName}" 吗？`)) return;
-    await deleteFile(file.fileId);
+  const onDelete = async (event: MouseEvent) => {
+    event.stopPropagation();
+    if (confirm(`确定将“${file.fileName}”移入回收站吗？`)) await deleteFile(file.fileId);
   };
 
+  const processing = ['RUNNING', 'QUEUED'].includes(file.transcodeStatus);
   return (
-    <div
-      onClick={() => setActive(file.fileId)}
-      className="group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-lg"
-    >
-      <div className="relative aspect-[4/3] overflow-hidden bg-slate-50">
-        {thumbUrl ? (
-          <img
-            src={thumbUrl}
-            alt={file.fileName}
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-            onError={() => setThumbUrl(null)}
-          />
-        ) : (
-          <div className={cn('flex h-full w-full items-center justify-center bg-gradient-to-br text-white', color)}>
-            <Icon className="h-12 w-12 opacity-90" strokeWidth={1.4} />
-          </div>
+    <article onClick={() => setActive(file.fileId)} className="group flex cursor-pointer flex-col overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest transition-all duration-200 hover:-translate-y-0.5 hover:shadow-ambient">
+      <div className="relative flex h-40 w-full items-center justify-center bg-surface-container-low">
+        {thumbnail && isPreviewable ? <img src={thumbnail} alt={file.fileName} className="h-full w-full object-cover" onError={() => setThumbnail(null)} /> : <MaterialIcon className={cn('text-[64px]', appearance.previewColor)}>{appearance.icon}</MaterialIcon>}
+        {category === 'video' && thumbnail && <span className="absolute inset-0 flex items-center justify-center"><span className="flex h-10 w-10 items-center justify-center rounded-full bg-surface/80 backdrop-blur-sm"><MaterialIcon>play_arrow</MaterialIcon></span></span>}
+        {(category === 'image' || category === 'video') && (file.status === 'AVAILABLE' || processing) && (
+          <span className="absolute right-sm top-sm flex items-center gap-xs rounded bg-surface/80 px-sm py-xs text-xs font-medium text-on-surface backdrop-blur-sm"><span className={cn('h-2 w-2 rounded-full', processing ? 'animate-pulse bg-amber-500' : 'bg-emerald-500')} />{processing ? '处理中' : '可用'}</span>
         )}
-
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-          <span className="truncate font-medium">{file.ext || '—'}</span>
-          <span className="shrink-0">{formatBytes(file.fileSize)}</span>
-        </div>
       </div>
-
-      <div className="flex flex-1 flex-col gap-2 p-3">
-        <div
-          className="truncate text-sm font-medium text-slate-900"
-          title={file.fileName}
-        >
-          {file.fileName}
-        </div>
-        <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
-          <span>{formatDate(file.createdAt)}</span>
-          {file.refCount > 1 && (
-            <Badge tone="info" className="!text-[10px]">
-              引用 {file.refCount}
-            </Badge>
-          )}
-          {transcodeBadge(file.transcodeStatus)}
-        </div>
-
-        <div className="mt-auto flex items-center justify-between pt-1">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDownload();
-              }}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-brand-600"
-              aria-label="下载"
-            >
-              <Download className="h-4 w-4" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setActive(file.fileId);
-              }}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-sky-600"
-              aria-label="详情"
-            >
-              <Info className="h-4 w-4" />
-            </button>
-            <button
-              onClick={onDelete}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-rose-600"
-              aria-label="删除"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-          <MoreHorizontal className="h-4 w-4 text-slate-300" />
-        </div>
+      <div className="flex min-h-[78px] flex-1 flex-col p-md">
+        <div className="mb-sm flex min-w-0 items-center gap-sm"><MaterialIcon className={cn('text-[22px]', appearance.iconColor)}>{appearance.icon}</MaterialIcon><span className="truncate text-label-md text-on-surface" title={file.fileName}>{file.fileName}</span></div>
+        <div className="mt-auto flex items-center justify-between text-label-sm text-on-surface-variant"><span>{formatBytes(file.fileSize)}</span><span>{formatCardDate(file.createdAt)}</span></div>
       </div>
-    </div>
+      <div className="flex h-0 justify-end gap-xs overflow-hidden border-outline-variant/50 bg-surface-bright px-sm opacity-0 transition-all group-hover:h-[41px] group-hover:border-t group-hover:py-sm group-hover:opacity-100">
+        <CardAction title="下载" icon="download" onClick={onDownload} />
+        <CardAction title="详情" icon="info" onClick={(event) => { event.stopPropagation(); setActive(file.fileId); }} />
+        <CardAction danger title="删除" icon="delete" onClick={onDelete} />
+      </div>
+    </article>
   );
+}
+
+function CardAction({ title, icon, onClick, danger = false }: { title: string; icon: string; onClick: (event: MouseEvent<HTMLButtonElement>) => void; danger?: boolean }) {
+  return <button type="button" title={title} aria-label={title} onClick={onClick} className={cn('rounded p-1.5 text-on-surface-variant hover:bg-surface-container-low hover:text-primary', danger && 'hover:bg-error-container hover:text-error')}><MaterialIcon className="text-[16px]">{icon}</MaterialIcon></button>;
+}
+
+function fileAppearance(name: string, category: ReturnType<typeof mimeCategory>) {
+  const ext = name.split('.').pop()?.toLowerCase();
+  if (category === 'image') return { icon: 'image', previewColor: 'text-primary', iconColor: 'text-primary' };
+  if (category === 'video') return { icon: 'movie', previewColor: 'text-purple-500', iconColor: 'text-purple-500' };
+  if (category === 'audio') return { icon: 'audio_file', previewColor: 'text-amber-500', iconColor: 'text-amber-600' };
+  if (['csv', 'xls', 'xlsx'].includes(ext || '')) return { icon: 'table', previewColor: 'text-emerald-500', iconColor: 'text-emerald-600' };
+  if (category === 'archive') return { icon: 'folder_zip', previewColor: 'text-orange-500', iconColor: 'text-orange-600' };
+  return { icon: 'description', previewColor: 'text-blue-500', iconColor: 'text-blue-600' };
+}
+
+function formatCardDate(value: string) {
+  return formatZhDate(value);
 }

@@ -1,76 +1,19 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../store';
-import { Button } from './ui/Button';
-import { Trash2, Share2, Eye, Save } from 'lucide-react';
 import { formatBytes } from '../lib/utils';
+import { formatZhDate } from '../lib/locale';
+import { MaterialIcon } from './ui/MaterialIcon';
 
 export function ShareList() {
-  const { shares, sharesLoading, refreshShares, cancelShare } = useAppStore();
-
-  useEffect(() => { refreshShares(); }, [refreshShares]);
-
+  const { shares, sharesLoading, refreshShares, cancelShare, showToast } = useAppStore();
+  useEffect(() => { void refreshShares(); }, [refreshShares]);
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">我的分享</h2>
-        <Button size="sm" variant="ghost" onClick={() => refreshShares()}>刷新</Button>
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        {sharesLoading ? (
-          <div className="py-12 text-center text-sm text-slate-400">加载中...</div>
-        ) : shares.length === 0 ? (
-          <div className="py-12 text-center text-sm text-slate-400">
-            <Share2 className="mx-auto mb-2 h-8 w-8 text-slate-300" />
-            暂无分享
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-50">
-            {shares.map((s) => (
-              <div key={s.shareId} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50/50">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                  <Share2 className="h-4 w-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-slate-800">{s.fileName}</div>
-                  <div className="flex items-center gap-3 text-xs text-slate-400">
-                    <span>{formatBytes(s.fileSize)}</span>
-                    <span className="flex items-center gap-0.5"><Eye className="h-3 w-3" /> {s.viewCount}</span>
-                    <span className="flex items-center gap-0.5"><Save className="h-3 w-3" /> {s.saveCount}</span>
-                    {s.expireAt && (
-                      <span className="text-orange-500">
-                        到期: {new Date(s.expireAt).toLocaleDateString('zh-CN')}
-                      </span>
-                    )}
-                    <span>创建: {new Date(s.createdAt).toLocaleString('zh-CN')}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(`${window.location.origin}/#/s/${s.shareId}`);
-                      alert('分享链接已复制');
-                    }}
-                  >
-                    复制链接
-                  </button>
-                  <button
-                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-red-500 hover:bg-red-50"
-                    onClick={() => {
-                      if (confirm('取消分享后链接将失效，确定吗？')) {
-                        cancelShare(s.shareId);
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> 取消分享
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+    <div className="p-margin-mobile md:p-margin-desktop">
+      <div className="mb-xl flex items-start justify-between"><div><h1 className="text-headline-lg">我的分享</h1><p className="mt-xs text-body-md text-on-surface-variant">管理已经创建的文件与文件夹分享链接。</p></div><button type="button" onClick={() => refreshShares()} className="flex h-10 items-center gap-sm rounded border border-outline-variant bg-white px-md text-label-md"><MaterialIcon className={sharesLoading ? 'animate-spin text-[18px]' : 'text-[18px]'}>refresh</MaterialIcon>刷新</button></div>
+      <section className="overflow-hidden rounded-xl border border-outline-variant bg-white shadow-sm">
+        <div className="grid grid-cols-[2fr_110px_100px_160px_170px] gap-md border-b border-outline-variant bg-surface-container-low px-md py-sm text-label-md tracking-wider text-on-surface-variant"><span>名称</span><span>大小</span><span>访问次数</span><span>有效期</span><span className="text-right">操作</span></div>
+        {sharesLoading ? <div className="flex h-32 items-center justify-center text-body-md text-outline"><MaterialIcon className="mr-sm animate-spin">progress_activity</MaterialIcon>正在加载分享…</div> : shares.length === 0 ? <div className="flex h-40 flex-col items-center justify-center text-body-md text-outline"><MaterialIcon className="mb-sm text-[38px] text-primary">share</MaterialIcon>暂无分享链接</div> : shares.map((share) => <div key={share.shareId} className="grid min-h-[64px] grid-cols-[2fr_110px_100px_160px_170px] items-center gap-md border-b border-surface-container px-md text-body-md last:border-0 hover:bg-surface-bright"><span className="flex min-w-0 items-center gap-sm"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-fixed text-primary"><MaterialIcon className="text-[19px]">share</MaterialIcon></span><span className="truncate font-medium">{share.fileName}</span></span><span className="text-on-surface-variant">{formatBytes(share.fileSize)}</span><span className="text-on-surface-variant">{share.viewCount}</span><span className="text-on-surface-variant">{share.expireAt ? formatZhDate(share.expireAt) : '永久有效'}</span><span className="flex justify-end gap-xs"><button type="button" onClick={async () => { await navigator.clipboard.writeText(`${window.location.origin}/#/s/${share.shareId}`); showToast({ kind: 'success', title: '访问地址已复制', description: '请将创建分享时显示的提取码一并发送给接收方。' }); }} className="stitch-icon-button" title="复制访问地址"><MaterialIcon className="text-[18px]">link</MaterialIcon></button><button type="button" onClick={() => { if (confirm('确定取消此分享链接吗？')) cancelShare(share.shareId); }} className="stitch-icon-button text-error hover:bg-error-container" title="取消分享"><MaterialIcon className="text-[18px]">link_off</MaterialIcon></button></span></div>)}
+      </section>
     </div>
   );
 }

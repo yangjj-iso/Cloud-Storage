@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
 import { QuotaWidget } from './components/QuotaWidget';
@@ -11,98 +11,104 @@ import { RecycleBin } from './components/RecycleBin';
 import { ShareList } from './components/ShareList';
 import { AdminPanel } from './components/AdminPanel';
 import { Toaster } from './components/ui/Toaster';
+import { MaterialIcon } from './components/ui/MaterialIcon';
 import { useAppStore } from './store';
 import { LoginPage } from './components/LoginPage';
+import { getPublicShareId, PublicSharePage } from './components/PublicSharePage';
 
 export default function App() {
+  const [shareId, setShareId] = useState(getPublicShareId);
+
+  useEffect(() => {
+    const onHashChange = () => setShareId(getPublicShareId());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  if (shareId) return <PublicSharePage shareId={shareId} />;
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
   const authChecked = useAppStore((s) => s.authChecked);
   const authUser = useAppStore((s) => s.authUser);
   const initAuth = useAppStore((s) => s.initAuth);
   const view = useAppStore((s) => s.view);
   const refreshQuota = useAppStore((s) => s.refreshQuota);
   const refreshFiles = useAppStore((s) => s.refreshFiles);
+  const refreshShares = useAppStore((s) => s.refreshShares);
 
   useEffect(() => {
-    initAuth();
+    void initAuth();
   }, [initAuth]);
 
   useEffect(() => {
+    const onUnauthorized = () => useAppStore.setState({ authUser: null, quota: null, files: [], uploads: [], activeFileId: null });
+    window.addEventListener('cloudchunk:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('cloudchunk:unauthorized', onUnauthorized);
+  }, []);
+
+  useEffect(() => {
     if (!authUser) return;
-    refreshQuota();
-    refreshFiles();
-    const t = setInterval(refreshQuota, 30000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser]);
+    void Promise.all([refreshQuota(), refreshFiles(), refreshShares()]);
+    const timer = window.setInterval(refreshQuota, 30000);
+    return () => window.clearInterval(timer);
+  }, [authUser, refreshFiles, refreshQuota, refreshShares]);
 
   if (!authChecked) {
-    return (
-      <div className="flex h-full items-center justify-center bg-slate-50 text-sm text-slate-500">
-        加载中...
-      </div>
-    );
+    return <div className="flex h-full items-center justify-center bg-background text-body-md text-on-surface-variant"><MaterialIcon className="mr-sm animate-pulse text-primary">cloud_sync</MaterialIcon>正在连接 CloudChunk…</div>;
   }
 
-  if (!authUser) {
-    return (
-      <>
-        <LoginPage />
-        <Toaster />
-      </>
-    );
-  }
+  if (!authUser) return <><LoginPage /><Toaster /></>;
 
   return (
-    <div className="flex h-full min-h-0 bg-gradient-to-br from-slate-50 via-white to-brand-50/30">
+    <div className="h-screen overflow-hidden bg-background text-on-background">
       <Sidebar />
-      <main className="flex min-w-0 flex-1 flex-col">
+      <div className="h-screen md:ml-[260px]">
         <Topbar />
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-            {view === 'upload' && (
-              <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
-                <div className="flex flex-col gap-5">
+        <main className="h-screen overflow-y-auto pt-0 md:h-[calc(100vh-64px)] md:pt-0 md:mt-16">
+          {view === 'upload' && (
+            <div className="p-lg lg:p-xl">
+              <div className="mb-lg">
+                <h1 className="text-headline-lg text-on-surface">上传中心</h1>
+                <p className="mt-xs text-body-md text-on-surface-variant">拖放文件并实时管理上传任务。</p>
+              </div>
+              <div className="grid grid-cols-1 items-start gap-lg lg:grid-cols-12">
+                <div className="space-y-lg lg:col-span-8">
                   <UploadDropZone />
                   <UploadQueue />
                 </div>
-                <aside className="order-first flex flex-col gap-4 lg:order-last">
+                <aside className="space-y-lg lg:col-span-4">
                   <QuotaWidget />
-                  <HelpCard />
+                  <UploadTip />
                 </aside>
               </div>
-            )}
-            {view === 'files' && <FilesView />}
-            {view === 'drive' && <DriveView />}
-            {view === 'recycle' && <RecycleBin />}
-            {view === 'shares' && <ShareList />}
-            {view === 'admin' && <AdminPanel />}
-          </div>
-        </div>
-      </main>
+            </div>
+          )}
+          {view === 'files' && <FilesView />}
+          {view === 'drive' && <DriveView />}
+          {view === 'recycle' && <RecycleBin />}
+          {view === 'shares' && <ShareList />}
+          {view === 'admin' && <AdminPanel />}
+        </main>
+      </div>
       <FileDrawer />
       <Toaster />
     </div>
   );
 }
 
-function HelpCard() {
+function UploadTip() {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm shadow-sm">
-      <div className="mb-2 text-sm font-semibold text-slate-800">使用技巧</div>
-      <ul className="flex flex-col gap-2 text-xs text-slate-600">
-        <li className="flex gap-2">
-          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-          文件 MD5 与已有内容匹配时自动走秒传通道。
-        </li>
-        <li className="flex gap-2">
-          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-          大文件自动分片并发上传，网络异常可重试续传。
-        </li>
-        <li className="flex gap-2">
-          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-          图片 / 视频 / 文档将在后台异步转码生成缩略图或摘要。
-        </li>
-      </ul>
-    </div>
+    <section className="rounded-xl border border-primary-fixed-dim bg-primary-fixed/45 p-lg text-on-surface">
+      <div className="flex items-start gap-md">
+        <MaterialIcon className="mt-xs text-primary">lightbulb</MaterialIcon>
+        <div>
+          <h3 className="text-body-md font-semibold">上传提示：智能并发</h3>
+          <p className="mt-sm text-body-md leading-5 text-on-surface-variant">CloudChunk 会自动切分大文件并并发上传，充分利用网络带宽，无需提前压缩文件。</p>
+          <span className="mt-md inline-flex items-center gap-xs text-label-md text-primary">支持秒传、断点续传与完整性校验 <MaterialIcon className="text-[17px]">verified</MaterialIcon></span>
+        </div>
+      </div>
+    </section>
   );
 }

@@ -54,30 +54,21 @@ export interface UploadProgress {
 export interface MergeResult {
   fileId: string;
   status: string;
-  objectKey: string;
-  etag: string;
 }
 
-export type FileStatus = 'INIT' | 'MERGING' | 'MERGED' | 'AVAILABLE' | 'BROKEN' | 'DELETED';
-export type TranscodeStatus = 'NONE' | 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+export type FileStatus = 'UPLOADING' | 'MERGED' | 'AVAILABLE' | 'BROKEN' | 'DELETED' | 'DELETING';
+export type TranscodeStatus = 'NONE' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIP' | 'QUEUED';
 
 export interface FileMeta {
-  id: number;
   fileId: string;
   fileMd5: string;
   fileName: string;
   fileSize: number;
   mimeType: string;
   ext?: string;
-  storageType: string;
-  bucket: string;
-  objectKey: string;
   status: FileStatus;
   transcodeStatus: TranscodeStatus;
   thumbnailUrl?: string | null;
-  extra?: string | null;
-  ownerId: number;
-  refCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,7 +78,8 @@ export interface UserQuota {
   totalBytes: number;
   usedBytes: number;
   fileCount: number;
-  updatedAt: string;
+  reservedBytes: number;
+  reservedFileCount: number;
 }
 
 export interface AuthUser {
@@ -116,17 +108,13 @@ export interface RegisterRequest {
   username: string;
   email?: string;
   password: string;
-  nickname?: string;
 }
 
 export interface TranscodeRecord {
   id: number;
-  fileId: string;
   taskType: string;
   status: number;
   retryCount: number;
-  result?: string;
-  errorMsg?: string;
   startedAt?: string;
   finishedAt?: string;
   createdAt: string;
@@ -135,7 +123,6 @@ export interface TranscodeRecord {
 export interface TranscodeStatusResp {
   fileId: string;
   transcodeStatus: TranscodeStatus;
-  extra: string;
   records: TranscodeRecord[];
 }
 
@@ -223,7 +210,6 @@ export interface PreviewResult {
   previewType: 'image' | 'video' | 'audio' | 'text' | 'pdf' | 'other';
   thumbnailUrl?: string | null;
   downloadUrl: string;
-  extra?: string | null;
 }
 
 // ===================== Admin =====================
@@ -232,7 +218,7 @@ export interface AdminUserItem {
   id: number;
   username: string;
   email: string;
-  nickname: string;
+  nickname?: string | null;
   role: string;
   status: number;
   totalBytes: number;
@@ -253,7 +239,6 @@ export interface AdminFileItem {
 }
 
 export interface SystemSetting {
-  id: number;
   key: string;
   value: string;
   updatedBy: number;

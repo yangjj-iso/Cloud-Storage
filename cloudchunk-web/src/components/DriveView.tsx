@@ -1,202 +1,165 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import { Button } from './ui/Button';
-import { Folder, File as FileIcon, ChevronLeft, FolderPlus, Trash2, Edit3, Share2, Download, Eye } from 'lucide-react';
 import { formatBytes } from '../lib/utils';
-import { downloadUrl } from '../lib/api';
+import { api, downloadUrl } from '../lib/api';
 import { downloadFile } from '../lib/download';
+import { MaterialIcon } from './ui/MaterialIcon';
+import { formatZhDate } from '../lib/locale';
 
 export function DriveView() {
-  const {
-    driveFiles, driveParentId, driveLoading,
-    refreshDrive, driveMkdir, driveRename, driveDelete, createShare,
-    showToast,
-  } = useAppStore();
+  const { driveFiles, driveParentId, driveLoading, refreshDrive, driveMkdir, driveRename, driveMove, driveDelete, createShare, showToast, setView } = useAppStore();
   const [showMkdir, setShowMkdir] = useState(false);
   const [newDirName, setNewDirName] = useState('');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [menuId, setMenuId] = useState<number | null>(null);
   const [renameId, setRenameId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [shareResult, setShareResult] = useState<{ shareId: string; shareCode: string } | null>(null);
+  const [movingId, setMovingId] = useState<number | null>(null);
+  const [targetParentId, setTargetParentId] = useState('0');
 
-  useEffect(() => {
-    refreshDrive(0);
-  }, [refreshDrive]);
+  useEffect(() => { void refreshDrive(0); }, [refreshDrive]);
 
-  const breadcrumbs = [{ id: 0, name: '全部文件' }];
-
-  const onDownloadFile = async (fileId: string, fileName: string, fileSize: number) => {
-    try {
-      await downloadFile({
-        url: downloadUrl(fileId),
-        fileName,
-        fileSize,
-      });
-    } catch (e) {
-      showToast({ kind: 'error', title: '下载失败', description: (e as Error).message });
-    }
+  const submitFolder = async () => {
+    if (!newDirName.trim()) return;
+    await driveMkdir(driveParentId, newDirName.trim());
+    setNewDirName('');
+    setShowMkdir(false);
   };
 
+  const onDownload = async (fileId: string, fileName: string, fileSize: number) => {
+    try { await downloadFile({ url: downloadUrl(fileId), fileName, fileSize }); }
+    catch (reason) { showToast({ kind: 'error', title: '下载失败', description: (reason as Error).message }); }
+  };
+
+  const downloadSelected = async () => {
+    if (!selected.size) return;
+    try {
+      const blob = await api.driveDownloadZip([...selected]);
+      const anchor = document.createElement('a');
+      anchor.href = URL.createObjectURL(blob);
+      anchor.download = `CloudChunk-打包下载-${new Date().toISOString().slice(0, 10)}.zip`;
+      anchor.click();
+      URL.revokeObjectURL(anchor.href);
+    } catch (reason) { showToast({ kind: 'error', title: '打包下载失败', description: (reason as Error).message }); }
+  };
+
+  const toggle = (id: number) => setSelected((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   return (
-    <div className="flex flex-col gap-3">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          {driveParentId !== 0 && (
-            <button
-              onClick={() => refreshDrive(0)}
-              className="flex items-center gap-1 rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100"
-            >
-              <ChevronLeft className="h-4 w-4" /> 返回根目录
-            </button>
-          )}
-          <span className="font-medium text-slate-800">我的网盘</span>
+    <div className="w-full max-w-[1400px] p-margin-mobile md:p-margin-desktop">
+      <div className="mb-lg flex items-center justify-between">
+        <div className="flex items-center gap-md">
+          {driveParentId !== 0 && <button type="button" onClick={() => refreshDrive(0)} className="stitch-icon-button"><MaterialIcon>arrow_back</MaterialIcon></button>}
+          <h1 className="text-headline-lg text-on-surface">我的云盘</h1>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setShowMkdir(true)}>
-          <FolderPlus className="mr-1 h-4 w-4" /> 新建文件夹
-        </Button>
+        <div className="flex gap-md">
+          {selected.size > 0 && <button type="button" onClick={downloadSelected} className="flex h-10 items-center gap-sm rounded-lg border border-primary-fixed-dim bg-primary-fixed px-md text-label-md text-primary shadow-sm"><MaterialIcon className="text-[18px]">folder_zip</MaterialIcon>打包下载（{selected.size}）</button>}
+          <button type="button" onClick={() => setShowMkdir(true)} className="flex h-10 items-center gap-sm rounded-lg border border-outline-variant bg-surface-container-lowest px-md text-label-md text-on-surface shadow-sm transition-colors hover:bg-surface-container">
+            <MaterialIcon className="text-[18px]">create_new_folder</MaterialIcon>新建文件夹
+          </button>
+          <button type="button" onClick={() => setView('upload')} className="flex h-10 items-center gap-sm rounded-lg bg-primary px-md text-label-md text-on-primary shadow-sm transition-colors hover:bg-primary-container">
+            <MaterialIcon className="text-[18px]">upload</MaterialIcon>上传文件
+          </button>
+        </div>
       </div>
 
-      {/* Mkdir input */}
       {showMkdir && (
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
-          <input
-            value={newDirName}
-            onChange={(e) => setNewDirName(e.target.value)}
-            placeholder="文件夹名称"
-            className="flex-1 rounded border border-slate-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:outline-none"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && newDirName.trim()) {
-                driveMkdir(driveParentId, newDirName.trim());
-                setNewDirName('');
-                setShowMkdir(false);
-              }
-            }}
-          />
-          <Button size="sm" onClick={() => {
-            if (newDirName.trim()) {
-              driveMkdir(driveParentId, newDirName.trim());
-              setNewDirName('');
-              setShowMkdir(false);
-            }
-          }}>创建</Button>
-          <Button size="sm" variant="ghost" onClick={() => setShowMkdir(false)}>取消</Button>
+        <div className="mb-md flex items-center gap-sm rounded-xl border border-outline-variant bg-white p-md shadow-sm">
+          <MaterialIcon className="text-secondary">create_new_folder</MaterialIcon>
+          <input autoFocus value={newDirName} onChange={(event) => setNewDirName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitFolder()} placeholder="请输入文件夹名称" className="stitch-focus h-9 min-w-0 flex-1 rounded border border-outline-variant px-sm text-body-md" />
+          <button type="button" onClick={submitFolder} className="h-9 rounded bg-primary px-md text-label-md text-white">创建</button>
+          <button type="button" onClick={() => setShowMkdir(false)} className="h-9 rounded px-md text-label-md text-on-surface-variant hover:bg-surface-container">取消</button>
         </div>
       )}
 
-      {/* File list */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <section className="overflow-visible rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+        <div className="grid grid-cols-12 gap-md rounded-t-xl border-b border-outline-variant bg-surface-container-low p-md text-label-md uppercase tracking-wider text-on-surface-variant">
+          <div className="col-span-6 flex items-center gap-md"><input aria-label="全选" type="checkbox" checked={driveFiles.length > 0 && selected.size === driveFiles.length} onChange={() => setSelected(selected.size === driveFiles.length ? new Set() : new Set(driveFiles.map((item) => item.id)))} className="h-4 w-4 rounded accent-primary" /><span>名称</span></div>
+          <div className="col-span-2 text-right">大小</div><div className="col-span-3">修改时间</div><div className="col-span-1 text-center">操作</div>
+        </div>
+
         {driveLoading ? (
-          <div className="py-12 text-center text-sm text-slate-400">加载中...</div>
+          <div className="flex h-28 items-center justify-center text-body-md text-outline"><MaterialIcon className="mr-sm animate-spin">progress_activity</MaterialIcon>正在加载文件…</div>
         ) : driveFiles.length === 0 ? (
-          <div className="py-12 text-center text-sm text-slate-400">空文件夹</div>
+          <div className="flex h-32 flex-col items-center justify-center text-body-md text-outline"><MaterialIcon className="mb-sm text-[32px]">folder_open</MaterialIcon>此文件夹为空</div>
         ) : (
-          <div className="divide-y divide-slate-50">
-            {driveFiles.map((f) => (
-              <div key={f.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50/50">
-                {f.isDir ? (
-                  <Folder className="h-5 w-5 shrink-0 text-amber-500" />
-                ) : (
-                  <FileIcon className="h-5 w-5 shrink-0 text-slate-400" />
-                )}
-
-                {renameId === f.id ? (
-                  <input
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    className="flex-1 rounded border border-slate-200 px-2 py-0.5 text-sm"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && renameValue.trim()) {
-                        driveRename(f.id, renameValue.trim());
-                        setRenameId(null);
-                      }
-                    }}
-                    onBlur={() => setRenameId(null)}
-                    autoFocus
-                  />
-                ) : (
-                  <button
-                    className="flex-1 text-left text-sm font-medium text-slate-700"
-                    onClick={() => f.isDir && refreshDrive(f.id)}
-                  >
-                    {f.fileName}
-                  </button>
-                )}
-
-                {!f.isDir && (
-                  <span className="text-xs text-slate-400">{formatBytes(f.fileSize)}</span>
-                )}
-
-                <div className="flex items-center gap-1">
-                  {!f.isDir && f.fileId && (
-                    <>
-                      <button
-                        type="button"
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                        title="下载"
-                        onClick={() => onDownloadFile(f.fileId!, f.fileName, f.fileSize)}
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                        title="分享"
-                        onClick={async () => {
-                          const r = await createShare(f.id, 7);
-                          if (r) setShareResult(r);
-                        }}
-                      >
-                        <Share2 className="h-3.5 w-3.5" />
-                      </button>
-                    </>
+          <div>{driveFiles.map((file, index) => {
+            const isSelected = selected.has(file.id);
+            const appearance = fileAppearance(file.fileName, file.isDir);
+            return (
+              <div key={file.id} className={`group grid min-h-[66px] grid-cols-12 items-center gap-md p-md transition-colors ${index < driveFiles.length - 1 ? 'border-b border-outline-variant' : ''} ${isSelected ? 'bg-secondary-container/30' : 'hover:bg-surface-container-lowest/50'}`}>
+                <div className="col-span-6 flex min-w-0 items-center gap-md">
+                  <input aria-label={`选择 ${file.fileName}`} type="checkbox" checked={isSelected} onChange={() => toggle(file.id)} className="h-4 w-4 shrink-0 rounded accent-primary" />
+                  <MaterialIcon filled className={`shrink-0 ${appearance.color}`}>{appearance.icon}</MaterialIcon>
+                  {renameId === file.id ? (
+                    <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={() => setRenameId(null)} onKeyDown={async (event) => { if (event.key === 'Enter' && renameValue.trim()) { await driveRename(file.id, renameValue.trim()); setRenameId(null); } }} className="stitch-focus h-8 min-w-0 flex-1 rounded border border-outline-variant px-sm text-body-md" />
+                  ) : (
+                    <button type="button" onDoubleClick={() => file.isDir && refreshDrive(file.id)} onClick={() => file.isDir && refreshDrive(file.id)} className="truncate text-left text-body-md font-medium text-on-surface hover:text-primary">{file.fileName}</button>
                   )}
-                  <button
-                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                    title="重命名"
-                    onClick={() => { setRenameId(f.id); setRenameValue(f.fileName); }}
-                  >
-                    <Edit3 className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    className="rounded p-1 text-red-400 hover:bg-red-50"
-                    title="删除"
-                    onClick={() => {
-                      if (confirm(`确定删除 "${f.fileName}" 吗？`)) driveDelete(f.id);
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                </div>
+                <div className="col-span-2 text-right text-body-md text-on-surface-variant">{file.isDir ? '--' : formatBytes(file.fileSize)}</div>
+                <div className="col-span-3 text-body-md text-on-surface-variant">{formatDriveDate(file.updatedAt || file.createdAt)}</div>
+                <div className="relative col-span-1 flex justify-center">
+                  <button type="button" onClick={() => setMenuId(menuId === file.id ? null : file.id)} className={`rounded-full p-xs text-on-surface-variant transition-all hover:bg-surface-container hover:text-primary ${isSelected || menuId === file.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}><MaterialIcon className="text-[20px]">more_vert</MaterialIcon></button>
+                  {menuId === file.id && (
+                    <div className="absolute right-2 top-8 z-20 w-36 rounded-xl border border-outline-variant bg-white p-xs text-body-md shadow-ambient">
+                      {!file.isDir && file.fileId && <MenuItem icon="download" label="下载" onClick={() => { setMenuId(null); onDownload(file.fileId!, file.fileName, file.fileSize); }} />}
+                      <MenuItem icon="folder_zip" label="打包下载" onClick={() => { setMenuId(null); setSelected(new Set([file.id])); void api.driveDownloadZip([file.id]).then((blob) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${file.fileName}.zip`; a.click(); URL.revokeObjectURL(a.href); }).catch((reason) => showToast({ kind: 'error', title: '打包下载失败', description: (reason as Error).message })); }} />
+                      <MenuItem icon="share" label="分享" onClick={async () => { setMenuId(null); const result = await createShare(file.id, 7); if (result) setShareResult(result); }} />
+                      <MenuItem icon="edit" label="重命名" onClick={() => { setRenameId(file.id); setRenameValue(file.fileName); setMenuId(null); }} />
+                      <MenuItem icon="drive_file_move" label="移动" onClick={() => { setMovingId(file.id); setTargetParentId('0'); setMenuId(null); }} />
+                      <MenuItem danger icon="delete" label="移入回收站" onClick={() => { setMenuId(null); if (confirm(`确定将“${file.fileName}”移入回收站吗？`)) driveDelete(file.id); }} />
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })}</div>
         )}
-      </div>
+      </section>
 
-      {/* Share result modal */}
       {shareResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShareResult(null)}>
-          <div className="w-96 rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 text-sm font-semibold text-slate-800">分享链接已创建</div>
-            <div className="space-y-2 text-sm">
-              <div>
-                <span className="text-slate-500">分享ID：</span>
-                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{shareResult.shareId}</code>
-              </div>
-              <div>
-                <span className="text-slate-500">提取码：</span>
-                <code className="rounded bg-brand-50 px-1.5 py-0.5 text-xs font-bold text-brand-700">{shareResult.shareCode}</code>
-              </div>
-              <div>
-                <span className="text-slate-500">链接：</span>
-                <code className="break-all text-xs text-brand-600">{window.location.origin}/#/s/{shareResult.shareId}</code>
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <Button size="sm" onClick={() => setShareResult(null)}>关闭</Button>
-            </div>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-inverse-surface/30" onClick={() => setShareResult(null)}>
+          <div className="w-[420px] rounded-xl border border-outline-variant bg-white p-lg shadow-ambient" onClick={(event) => event.stopPropagation()}>
+            <h2 className="text-headline-md">分享链接已创建</h2>
+            <div className="mt-md space-y-sm text-body-md text-on-surface-variant"><p>分享编号：<code className="text-on-surface">{shareResult.shareId}</code></p><p>提取码：<code className="font-semibold text-primary">{shareResult.shareCode}</code></p><p className="break-all">{window.location.origin}/#/s/{shareResult.shareId}?code={encodeURIComponent(shareResult.shareCode)}</p></div>
+            <button type="button" onClick={async () => { await navigator.clipboard.writeText(`${window.location.origin}/#/s/${shareResult.shareId}?code=${encodeURIComponent(shareResult.shareCode)}`); showToast({ kind: 'success', title: '分享链接已复制' }); }} className="mt-lg h-10 w-full rounded border border-primary text-label-md text-primary">复制分享链接</button>
+            <button type="button" onClick={() => setShareResult(null)} className="mt-sm h-10 w-full rounded bg-primary text-label-md text-white">完成</button>
+          </div>
+        </div>
+      )}
+
+      {movingId !== null && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-inverse-surface/30" onClick={() => setMovingId(null)}>
+          <div className="w-[380px] rounded-xl border border-outline-variant bg-white p-lg shadow-ambient" onClick={(event) => event.stopPropagation()}>
+            <h2 className="text-headline-md">移动文件</h2><p className="mt-xs text-body-md text-on-surface-variant">请输入目标文件夹编号；输入 0 表示根目录。</p>
+            <label className="mt-lg block text-label-sm text-on-surface-variant">目标文件夹编号<input autoFocus type="number" min="0" value={targetParentId} onChange={(event) => setTargetParentId(event.target.value)} className="stitch-focus mt-xs h-10 w-full rounded border border-outline-variant px-sm text-body-md" /></label>
+            <div className="mt-lg flex justify-end gap-sm"><button type="button" onClick={() => setMovingId(null)} className="h-10 rounded px-md text-label-md text-on-surface-variant">取消</button><button type="button" onClick={async () => { await driveMove(movingId, Math.max(0, Number(targetParentId) || 0)); setMovingId(null); }} className="h-10 rounded bg-primary px-md text-label-md text-white">确认移动</button></div>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+function MenuItem({ icon, label, onClick, danger = false }: { icon: string; label: string; onClick: () => void; danger?: boolean }) {
+  return <button type="button" onClick={onClick} className={`flex w-full items-center gap-sm rounded-lg px-sm py-sm text-left hover:bg-surface-container ${danger ? 'text-error' : 'text-on-surface-variant'}`}><MaterialIcon className="text-[17px]">{icon}</MaterialIcon>{label}</button>;
+}
+
+function fileAppearance(name: string, isDir: boolean) {
+  if (isDir) return { icon: 'folder', color: 'text-secondary' };
+  const extension = name.split('.').pop()?.toLowerCase();
+  if (extension === 'pdf') return { icon: 'picture_as_pdf', color: 'text-error' };
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension || '')) return { icon: 'image', color: 'text-primary' };
+  if (['csv', 'xls', 'xlsx'].includes(extension || '')) return { icon: 'table_chart', color: 'text-tertiary-container' };
+  return { icon: 'draft', color: 'text-secondary' };
+}
+
+function formatDriveDate(value: string) {
+  return formatZhDate(value, true);
 }

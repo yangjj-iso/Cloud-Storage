@@ -1,79 +1,51 @@
-import { UploadCloud, Zap } from 'lucide-react';
 import { useRef, useState, type DragEvent } from 'react';
 import { cn } from '../lib/utils';
 import { useAppStore } from '../store';
+import { MaterialIcon } from './ui/MaterialIcon';
 
 export function UploadDropZone() {
   const enqueue = useAppStore((s) => s.enqueueFiles);
   const inputRef = useRef<HTMLInputElement>(null);
   const [active, setActive] = useState(false);
 
-  const onDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
     setActive(false);
-    if (e.dataTransfer?.files?.length) {
-      enqueue(e.dataTransfer.files);
-    }
+    if (event.dataTransfer.files.length) enqueue(event.dataTransfer.files);
   };
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={() => inputRef.current?.click()}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!active) setActive(true);
-      }}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }}
+      onDragOver={(event) => { event.preventDefault(); setActive(true); }}
       onDragLeave={() => setActive(false)}
       onDrop={onDrop}
       className={cn(
-        'group relative flex cursor-pointer flex-col items-center justify-center gap-3 overflow-hidden rounded-2xl border-2 border-dashed p-10 text-center transition-all',
-        active
-          ? 'border-brand-500 bg-brand-50/60 shadow-inner shadow-brand-600/10'
-          : 'border-slate-300 bg-white/60 hover:border-brand-400 hover:bg-brand-50/30'
+        'group relative flex min-h-[280px] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed p-8 text-center transition-all duration-300',
+        active ? 'border-primary bg-surface-container-low' : 'border-outline-variant bg-surface-container-lowest hover:border-primary hover:bg-surface-container-low'
       )}
     >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,theme(colors.brand.50),transparent_60%)] opacity-0 transition-opacity group-hover:opacity-100"
-      />
-      <div
-        className={cn(
-          'relative flex h-14 w-14 items-center justify-center rounded-full transition-transform',
-          active
-            ? 'bg-brand-600 text-white scale-110'
-            : 'bg-brand-50 text-brand-600 group-hover:scale-105'
-        )}
-      >
-        <UploadCloud className="h-7 w-7" />
+      <div className="absolute inset-0 bg-gradient-to-br from-primary-fixed/20 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+      <span className="z-10 mb-lg flex h-20 w-20 items-center justify-center rounded-full bg-surface-container transition-all duration-300 group-hover:scale-110 group-hover:bg-primary-fixed">
+        <MaterialIcon className="text-4xl text-primary">cloud_upload</MaterialIcon>
+      </span>
+      <h2 className="z-10 mb-sm text-headline-md text-on-background">{active ? '松开鼠标即可上传' : '将文件拖放到这里'}</h2>
+      <p className="z-10 mb-lg text-body-md text-on-surface-variant">也可以点击从电脑中选择文件</p>
+      <span className="z-10 rounded-full bg-primary px-lg py-2.5 text-label-md text-on-primary transition-colors group-hover:bg-primary-container">选择文件</span>
+      <div className="z-10 mt-xl flex flex-wrap justify-center gap-sm">
+        <Capability icon="verified">MD5 完整性校验</Capability>
+        <Capability icon="dynamic_feed">自动分片</Capability>
+        <Capability icon="fast_forward">并发上传</Capability>
+        <Capability icon="play_pause">断点续传</Capability>
       </div>
-
-      <div className="relative">
-        <div className="text-base font-semibold text-slate-900">
-          {active ? '松开以上传' : '点击或拖拽文件到此处'}
-        </div>
-        <div className="mt-1 text-xs text-slate-500">
-          支持分片、秒传、断点续传；单文件可达 GB 级别
-        </div>
-      </div>
-
-      <div className="relative mt-2 flex flex-wrap justify-center gap-2 text-[11px] text-slate-500">
-        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5">
-          <Zap className="h-3 w-3 text-amber-500" /> MD5 命中即秒传
-        </span>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5">自动分片</span>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5">并发上传</span>
-      </div>
-
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          if (e.target.files?.length) enqueue(e.target.files);
-          e.target.value = '';
-        }}
-      />
+      <input ref={inputRef} className="hidden" type="file" multiple onChange={(event) => { if (event.target.files?.length) enqueue(event.target.files); event.target.value = ''; }} />
     </div>
   );
+}
+
+function Capability({ icon, children }: { icon: string; children: string }) {
+  return <span className="inline-flex items-center rounded-md border border-outline-variant/30 bg-surface-variant px-2.5 py-1 text-xs font-medium text-on-surface-variant"><MaterialIcon className="mr-xs text-[14px]">{icon}</MaterialIcon>{children}</span>;
 }

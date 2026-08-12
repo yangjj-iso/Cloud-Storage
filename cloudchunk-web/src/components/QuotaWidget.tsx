@@ -1,52 +1,41 @@
-import { HardDrive, TrendingUp } from 'lucide-react';
 import { useAppStore } from '../store';
 import { formatBytes } from '../lib/utils';
-import { Progress } from './ui/Progress';
+import { MaterialIcon } from './ui/MaterialIcon';
 
 export function QuotaWidget() {
   const quota = useAppStore((s) => s.quota);
+  const sharesTotal = useAppStore((s) => s.sharesTotal);
+
   if (!quota) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="h-4 w-24 animate-pulse rounded bg-slate-100" />
-        <div className="mt-4 h-2 animate-pulse rounded bg-slate-100" />
-      </div>
-    );
+    return <section className="h-[232px] animate-pulse rounded-xl border border-outline-variant bg-surface-container-lowest p-lg"><div className="h-6 w-32 rounded bg-surface-container" /><div className="mt-lg h-10 w-48 rounded bg-surface-container" /></section>;
   }
 
-  const pct = quota.totalBytes > 0 ? (quota.usedBytes / quota.totalBytes) * 100 : 0;
-  const tone = pct > 85 ? 'danger' : pct > 60 ? 'brand' : 'brand';
+  const percentage = quota.totalBytes > 0 ? Math.min(100, (quota.usedBytes / quota.totalBytes) * 100) : 0;
+  const remaining = Math.max(0, quota.totalBytes - quota.usedBytes);
+  const used = formatBytes(quota.usedBytes).split(' ');
+  const totalLabel = formatBytes(quota.totalBytes);
+  const remainingLabel = formatBytes(remaining);
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div
-        aria-hidden
-        className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-brand-50 blur-2xl"
-      />
-      <div className="relative flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-          <HardDrive className="h-4 w-4 text-brand-600" />
-          存储空间
-        </div>
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500">
-          <TrendingUp className="h-3 w-3" />
-          {quota.fileCount} 个文件
-        </span>
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg shadow-sm">
+      <div className="mb-md flex items-center justify-between">
+        <h2 className="text-[18px] font-semibold leading-7 text-on-background">存储配额</h2>
+        <MaterialIcon className="text-outline">data_usage</MaterialIcon>
       </div>
-
-      <div className="relative mt-3 flex items-baseline gap-2">
-        <div className="text-2xl font-semibold tracking-tight text-slate-900">
-          {formatBytes(quota.usedBytes)}
-        </div>
-        <div className="text-xs text-slate-400">/ {formatBytes(quota.totalBytes)}</div>
+      <div className="mb-sm flex items-end gap-xs">
+        <span className="text-[30px] font-bold leading-none text-primary">{used[0]}</span>
+        <span className="pb-0.5 text-body-md text-on-surface-variant">{used[1] || ''} 已使用</span>
+        <span className="px-xs pb-0.5 text-body-md text-outline">/</span>
+        <span className="pb-0.5 text-body-md text-on-surface-variant">{totalLabel}</span>
       </div>
-
-      <div className="relative mt-3">
-        <Progress value={pct} variant={tone} />
+      <div className="mt-md">
+        <div className="mb-1.5 flex justify-between text-label-sm"><span className="font-medium text-on-background">已使用 {percentage.toFixed(0)}%</span><span className="text-outline">剩余 {remainingLabel}</span></div>
+        <div className="h-2 w-full rounded-full bg-surface-variant"><div className="h-2 rounded-full bg-primary" style={{ width: `${percentage}%` }} /></div>
       </div>
-      <div className="relative mt-1.5 text-[11px] text-slate-500">
-        已用 {pct.toFixed(1)}%
+      <div className="mt-lg grid grid-cols-2 gap-md border-t border-outline-variant pt-md text-center">
+        <div><p className="mb-xs text-label-sm text-outline">文件总数</p><p className="text-headline-md text-on-background">{quota.fileCount.toLocaleString()}</p></div>
+        <div><p className="mb-xs text-label-sm text-outline">分享数量</p><p className="text-headline-md text-on-background">{sharesTotal.toLocaleString()}</p></div>
       </div>
-    </div>
+    </section>
   );
 }

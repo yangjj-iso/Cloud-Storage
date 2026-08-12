@@ -19,12 +19,12 @@ export function Toaster() {
   const dismiss = useAppStore((s) => s.dismissToast);
 
   return (
-    <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-80 flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 left-4 z-[80] flex w-80 flex-col-reverse gap-2">
       {toasts.map((t) => (
         <div
           key={t.id}
           className={cn(
-            'pointer-events-auto flex items-start gap-3 rounded-xl border bg-white/95 p-3 pr-2 shadow-lg shadow-slate-900/5 backdrop-blur animate-slide-in',
+            'pointer-events-auto flex items-start gap-3 rounded-xl border bg-white/95 p-3 pr-2 shadow-ambient backdrop-blur animate-fade-in',
             borderByKind[t.kind]
           )}
         >

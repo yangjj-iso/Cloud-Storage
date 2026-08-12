@@ -59,6 +59,12 @@ export function saveStoredAuth(auth: AuthResponse) {
   );
 }
 
+export function saveStoredUser(user: AuthUser) {
+  const stored = getStoredAuth();
+  if (!stored) return;
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ ...stored, user } satisfies StoredAuth));
+}
+
 export function clearStoredAuth() {
   localStorage.removeItem(AUTH_STORAGE_KEY);
 }
@@ -75,17 +81,48 @@ async function parse<T>(res: Response): Promise<T> {
     } catch {
       /* non-json */
     }
-    throw new ApiError(
-      body?.code ?? res.status,
-      body?.message ?? res.statusText ?? `HTTP ${res.status}`,
-      body?.traceId
-    );
+    const code = body?.code ?? res.status;
+    if (res.status === 401 || code === 100002) {
+      clearStoredAuth();
+      window.dispatchEvent(new CustomEvent('cloudchunk:unauthorized'));
+    }
+    throw new ApiError(code, localizeApiMessage(code, body?.message ?? `请求失败（HTTP ${res.status}）`), body?.traceId);
   }
   const body: ApiResult<T> = await res.json();
   if (body.code !== 0) {
-    throw new ApiError(body.code, body.message, body.traceId);
+    throw new ApiError(body.code, localizeApiMessage(body.code, body.message), body.traceId);
   }
   return body.data;
+}
+
+const apiMessages: Record<number, string> = {
+  100001: '请求参数不正确',
+  100002: '登录状态已失效，请重新登录',
+  100003: '没有权限执行此操作',
+  100004: '请求的资源不存在',
+  100005: '操作过于频繁，请稍后重试',
+  100500: '服务器内部错误',
+  200001: '上传会话已过期，请重新上传',
+  200002: '文件分片序号不正确',
+  200003: '文件分片校验失败',
+  200004: '相同文件正在上传中',
+  200005: '文件完整性校验失败',
+  200006: '文件分片合并失败',
+  200007: '文件分片尚未上传完成',
+  300001: '文件不存在',
+  300002: '文件已损坏',
+  300003: '下载范围无效',
+  400001: '转码记录不存在',
+  400002: '文件正在转码中',
+  500001: '存储服务暂不可用',
+  500002: '存储空间不足',
+  600001: '存储配额不足',
+};
+
+function localizeApiMessage(code: number, message: string): string {
+  const base = apiMessages[code];
+  if (!base) return message || '请求失败';
+  return base;
 }
 
 function authHeaders(): HeadersInit {
@@ -133,7 +170,7 @@ export const api = {
 
   ping: async () => {
     const res = await fetch(`${API_BASE}/ping`, { headers: authHeaders() });
-    return parse<{ status: string; storage: string; bucket: string }>(res);
+    return parse<{ status: string }>(res);
   },
 
   quota: async (): Promise<UserQuota> => {
@@ -299,7 +336,7 @@ export const api = {
   },
 
   // ===== Email / Auth =====
-  sendCode: async (email: string, type: 'register' | 'reset'): Promise<void> => {
+  sendCode: async (email: string, type: 'register' | 'reset' | 'bind'): Promise<void> => {
     const res = await fetch(`${API_BASE}/auth/send-code`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -313,6 +350,15 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, code, newPassword }),
+    });
+    await parse<void>(res);
+  },
+
+  changeEmail: async (newEmail: string, code: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/auth/change-email`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newEmail, code }),
     });
     await parse<void>(res);
   },
@@ -356,6 +402,21 @@ export const api = {
       headers: authHeaders(),
     });
     await parse<void>(res);
+  },
+
+  driveDownloadZip: async (ids: number[]): Promise<Blob> => {
+    const res = await fetch(`${API_BASE}/drive/download-zip`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) {
+      let body: ApiResult<unknown> | null = null;
+      try { body = await res.json(); } catch { /* non-json */ }
+      const code = body?.code ?? res.status;
+      throw new ApiError(code, localizeApiMessage(code, body?.message ?? `请求失败（HTTP ${res.status}）`), body?.traceId);
+    }
+    return res.blob();
   },
 
   // ===== Recycle Bin =====
@@ -419,6 +480,22 @@ export const api = {
     return parse<ShareDetail>(res);
   },
 
+  publicShareChildren: async (shareId: string, shareCode: string, parentId = 0): Promise<UserFileItem[]> => {
+    const q = new URLSearchParams({ code: shareCode, parentId: String(parentId) });
+    const res = await fetch(`${API_BASE}/share/${shareId}/children?${q.toString()}`);
+    return parse<UserFileItem[]>(res);
+  },
+
+  publicShareDownloadUrl: (shareId: string, shareCode: string): string => {
+    const q = new URLSearchParams({ code: shareCode });
+    return `${API_BASE}/share/${shareId}/download?${q.toString()}`;
+  },
+
+  publicShareZipUrl: (shareId: string, shareCode: string): string => {
+    const q = new URLSearchParams({ code: shareCode });
+    return `${API_BASE}/share/${shareId}/download-zip?${q.toString()}`;
+  },
+
   // ===== Preview =====
   preview: async (id: number): Promise<PreviewResult> => {
     const res = await fetch(`${API_BASE}/preview/${id}`, { headers: authHeaders() });
@@ -426,8 +503,10 @@ export const api = {
   },
 
   // ===== Admin =====
-  adminListUsers: async (page = 1, size = 20): Promise<PageResult<AdminUserItem>> => {
-    const res = await fetch(`${API_BASE}/admin/users?page=${page}&size=${size}`, { headers: authHeaders() });
+  adminListUsers: async (page = 1, size = 20, keyword = ''): Promise<PageResult<AdminUserItem>> => {
+    const q = new URLSearchParams({ page: String(page), size: String(size) });
+    if (keyword) q.set('keyword', keyword);
+    const res = await fetch(`${API_BASE}/admin/users?${q.toString()}`, { headers: authHeaders() });
     return parse<PageResult<AdminUserItem>>(res);
   },
 
@@ -443,6 +522,24 @@ export const api = {
     const res = await fetch(`${API_BASE}/admin/users/${userId}/enable`, {
       method: 'POST',
       headers: authHeaders(),
+    });
+    await parse<void>(res);
+  },
+
+  adminResetPassword: async (userId: number, newPassword: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}/reset-password`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newPassword }),
+    });
+    await parse<void>(res);
+  },
+
+  adminSetRole: async (userId: number, role: 'user' | 'admin'): Promise<void> => {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role }),
     });
     await parse<void>(res);
   },

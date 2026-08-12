@@ -46,7 +46,7 @@ export async function downloadFile(opts: {
   } else if (fileSize <= BLOB_MAX) {
     await downloadAsBlob(url, fileName, fileSize, onProgress);
   } else if (backend) {
-    throw new Error('当前浏览器不支持大文件流式保存，请使用支持 File System Access API 的浏览器下载。');
+    throw new Error('当前浏览器不支持大文件流式保存，请使用支持文件系统访问接口的浏览器下载。');
   } else {
     window.open(url, '_blank');
   }
@@ -135,7 +135,7 @@ async function downloadSingleRequest(
   }
   const res = await fetch(url, { headers });
   if (!res.ok) {
-    throw new Error(`Download failed: ${res.status}`);
+    throw new Error(`下载失败，服务器状态码：${res.status}`);
   }
   const blob = await res.blob();
   onProgress?.(makeProgress(blob.size, blob.size || 1));
@@ -153,7 +153,7 @@ async function fetchRange(url: string, start: number, end: number): Promise<Arra
   }
   const res = await fetch(url, { headers });
   if (res.status !== 206) {
-    throw new Error(`Range fetch failed: ${res.status} ${start}-${end}`);
+    throw new Error(`分段下载失败，服务器状态码：${res.status}，范围：${start}-${end}`);
   }
   return res.arrayBuffer();
 }

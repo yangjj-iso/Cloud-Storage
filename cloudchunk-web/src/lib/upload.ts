@@ -9,6 +9,7 @@ import {
   delUploadState,
 } from './idb';
 import type { UploadTask, UploadTaskStatus } from '../types';
+import { connectUploadWs } from './ws';
 
 /* ---------- 动态并发参数 ---------- */
 const MIN_CONCURRENCY = 2;
@@ -68,6 +69,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     });
 
   let stage: 'HASH' | 'INIT' | 'UPLOAD' | 'MERGE' = 'HASH';
+  let progressSocket: WebSocket | null = null;
   try {
     // 1. single-pass hash（优先 IndexedDB 缓存命中，跳过整次文件读取）
     cb.onStatus('HASHING', { startedAt: Date.now() });
@@ -170,6 +172,18 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     let bytesSoFar = uploaded.size * actualChunkSize;
     const startTs = Date.now();
 
+    // 订阅后端确认的分片进度。当前标签页仍以请求响应为主，WebSocket 用于
+    // 同一上传会话在其他标签页或重连场景下同步已确认分片。
+    progressSocket = connectUploadWs(init.fileId, (message) => {
+      const idx = message.chunkIndex;
+      if (idx < 0 || idx >= actualChunkTotal || uploaded.has(idx)) return;
+      uploaded.add(idx);
+      const bytesDelta = Math.min(actualChunkSize, file.size - idx * actualChunkSize);
+      bytesSoFar += bytesDelta;
+      const elapsed = (Date.now() - startTs) / 1000;
+      cb.onChunkDone(idx, bytesDelta, elapsed > 0 ? bytesSoFar / elapsed : 0);
+    });
+
     // 预签名 URL 缓存 + 批量预取
     const PRESIGN_BATCH = 50;
     let presignedUrls: Record<string, string> = {};
@@ -263,14 +277,15 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
           const idx = indices[cursor++];
           const elapsed_ms = await uploadOneChunk(idx);
 
-          uploaded.add(idx);
-          const bytesDelta = Math.min(actualChunkSize, file.size - idx * actualChunkSize);
-          bytesSoFar += bytesDelta;
-          const elapsed = (Date.now() - startTs) / 1000;
-          const speed = elapsed > 0 ? bytesSoFar / elapsed : 0;
-          // UI 进度按“客户端已完成上传的分片”推进；
-          // 后端最终可信进度仍以 confirmChunk/uploadChunk 写入的 Redis 进度为准。
-          cb.onChunkDone(idx, bytesDelta, speed);
+          if (!uploaded.has(idx)) {
+            uploaded.add(idx);
+            const bytesDelta = Math.min(actualChunkSize, file.size - idx * actualChunkSize);
+            bytesSoFar += bytesDelta;
+            const elapsed = (Date.now() - startTs) / 1000;
+            const speed = elapsed > 0 ? bytesSoFar / elapsed : 0;
+            // UI 进度按后端已经确认的分片推进。
+            cb.onChunkDone(idx, bytesDelta, speed);
+          }
 
           // 每 10 片持久化一次上传进度到 IndexedDB（断电 / 关标签页后可恢复）
           if (idx % 10 === 0 || cursor >= indices.length) {
@@ -362,5 +377,7 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
     console.error('[upload]', stageLabel, raw);
     cb.onStatus('FAILED', { error: err.message, finishedAt: Date.now() });
     cb.onError(err);
+  } finally {
+    progressSocket?.close();
   }
 }
