@@ -102,10 +102,14 @@ cloudchunk:
 
 ## 数据库与运行角色
 
-- Flyway 是 Schema 的单一来源：`V1` 是空库基线，`V2` 增加 Outbox/Inbox/GC 与转码幂等键，`V3` 增加配额预留并迁移旧的未完成上传占用。Compose 不再自动导入另一份 Schema。
+- Flyway 是 Schema 的单一来源：`V1` 是空库基线，`V2` 增加 Outbox/Inbox/GC 与转码幂等键，`V3` 增加配额预留并迁移旧的未完成上传占用，`V4` 补上保留策略扫描所需的索引。Compose 不再自动导入另一份 Schema。
 - `application-api.yml` 关闭定时任务和消息消费者。
 - `application-worker.yml` 使用非 Web 应用模式，只运行 Outbox、消费、转码、补偿和 GC。
 - `docker compose --profile app ...` 启动 API、Worker、Nginx Web 和全部基础设施；不带 profile 时仍可只启动基础设施用于本地开发。
+
+两种角色的边界由**组件扫描**划出，而不只是配置开关。`CloudchunkApplication` 不扫描 `com.cloudchunk.api`，交付层改由 `ApiRoleConfiguration` 在 servlet 环境下引入。原因是 Controller、过滤器和 `SecurityConfig` 依赖的是只有 Web 上下文才存在的东西：Worker 以非 Web 模式启动却把它们扫进来，会直接死在类似「`UploadController` 找不到 `UploadProgressBroadcaster`」的依赖上——而那个 bean 本身正确地标注了只在 Web 环境下装配。
+
+这条边界此前只有配置层面的 `worker-enabled` 开关，没有任何测试覆盖，Worker 角色实际上一直无法启动。`ApiApplicationContextIT` 与 `WorkerRoleWiringIT` 现在分别验证两侧：前者确认 API 角色能完整启动且不含后台组件，后者确认 `worker-enabled=true` 时后台组件确实被装配、且 Web 组件不会混进来。只测一侧是半个测试——如果条件注解被改成永远不生效，API 侧照样通过，而 Worker 会安静地什么都不做。
 
 ## 前端与验证
 
