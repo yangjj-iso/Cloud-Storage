@@ -44,6 +44,10 @@ __pycache__/
 benchmark-output.txt
 RESUME.md
 
+### Agent / tooling scratch output ###
+/outputs/
+/.workbuddy/
+
 ### Deploy local data ###
 deploy/mysql/data/
 deploy/redis/data/
@@ -59,3 +63,10 @@ deploy/rocketmq/store/
 application-local.yml
 application-local.yaml
 application-local.properties
+
+### Frontend build artifacts ###
+cloudchunk-web/tsconfig.tsbuildinfo
+cloudchunk-web/stitch-export/
+
+### Local agent / editor tooling ###
+.cursor/
