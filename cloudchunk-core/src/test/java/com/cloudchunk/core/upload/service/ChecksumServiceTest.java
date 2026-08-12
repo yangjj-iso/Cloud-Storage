@@ -3,11 +3,7 @@ package com.cloudchunk.core.upload.service;
 import com.cloudchunk.common.enums.FileStatus;
 import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.service.FileMetaService;
-import com.cloudchunk.mq.message.BrokenMessage;
-import com.cloudchunk.mq.message.ChecksumMessage;
-import com.cloudchunk.mq.message.TranscodeMessage;
-import com.cloudchunk.mq.producer.BrokenProducer;
-import com.cloudchunk.mq.producer.TranscodeProducer;
+import com.cloudchunk.contract.event.ChecksumRequested;
 import com.cloudchunk.storage.StorageStrategy;
 import com.cloudchunk.storage.StorageStrategyFactory;
 import com.cloudchunk.storage.model.GetRequest;
@@ -35,18 +31,17 @@ class ChecksumServiceTest {
 
     @Mock private FileMetaService fileMetaService;
     @Mock private StorageStrategyFactory storageFactory;
-    @Mock private TranscodeProducer transcodeProducer;
-    @Mock private BrokenProducer brokenProducer;
+    @Mock private ChecksumTransitionService transitionService;
 
     @InjectMocks
     private ChecksumService checksumService;
 
-    private ChecksumMessage msg;
+    private ChecksumRequested msg;
     private StorageStrategy storage;
 
     @BeforeEach
     void setUp() {
-        msg = new ChecksumMessage();
+        msg = new ChecksumRequested();
         msg.setFileId("file-1");
         msg.setBucket("bucket");
         msg.setObjectKey("key");
@@ -94,8 +89,7 @@ class ChecksumServiceTest {
 
         checksumService.verify(msg);
 
-        verify(fileMetaService).updateStatus("file-1", FileStatus.AVAILABLE);
-        verify(transcodeProducer).publish(any(TranscodeMessage.class));
+        verify(transitionService).markAvailableAndRequestTranscode(msg);
     }
 
     @Test
@@ -113,12 +107,11 @@ class ChecksumServiceTest {
 
         checksumService.verify(msg);
 
-        verify(fileMetaService).updateStatus("file-1", FileStatus.BROKEN);
-        verify(brokenProducer).publish(any(BrokenMessage.class));
+        verify(transitionService).markBroken(msg, "md5 mismatch");
     }
 
     @Test
-    void verify_mismatch_deletesObject() throws Exception {
+    void verify_mismatch_doesNotDeleteObjectInline() throws Exception {
         FileMeta meta = new FileMeta();
         meta.setFileId("file-1");
         meta.setStatus(FileStatus.MERGED);
@@ -132,7 +125,8 @@ class ChecksumServiceTest {
 
         checksumService.verify(msg);
 
-        verify(storage).delete("bucket", "key");
+        verify(storage, never()).delete("bucket", "key");
+        verify(transitionService).markBroken(msg, "md5 mismatch");
     }
 
     @Test

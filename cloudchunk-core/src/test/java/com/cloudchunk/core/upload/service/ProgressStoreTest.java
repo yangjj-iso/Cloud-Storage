@@ -4,6 +4,7 @@ import com.cloudchunk.infra.redis.RedisService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -101,17 +102,32 @@ class ProgressStoreTest {
     }
 
     @Test
-    void rebuild_writesAllFieldsAndExpire() {
+    void rebuild_executesAtomicScriptWithTotalTtlAndConfirmedIndices() {
+        StringRedisTemplate rawTemplate = mock(StringRedisTemplate.class);
+        when(redis.raw()).thenReturn(rawTemplate);
+        when(rawTemplate.execute(any(), anyList(), any(Object[].class))).thenReturn(3L);
         Set<Integer> confirmed = new TreeSet<>(Set.of(0, 2, 5));
-        Duration ttl = Duration.ofHours(24);
 
-        progressStore.rebuild(FILE_ID, 10, confirmed, ttl);
+        int count = progressStore.rebuild(FILE_ID, 10, confirmed, Duration.ofHours(24));
 
-        verify(redis).hSet(PROGRESS_KEY, "__total__", "10");
-        verify(redis).hSet(PROGRESS_KEY, "__count__", "3");
-        verify(redis).hSet(PROGRESS_KEY, "0", "1");
-        verify(redis).hSet(PROGRESS_KEY, "2", "1");
-        verify(redis).hSet(PROGRESS_KEY, "5", "1");
-        verify(redis).expire(PROGRESS_KEY, ttl);
+        assertThat(count).isEqualTo(3);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(rawTemplate).execute(any(), eq(List.of(PROGRESS_KEY)), args.capture());
+        // ARGV = [chunkTotal, ttlSeconds, ...confirmed indices]
+        assertThat(args.getValue()).containsExactly("10", "86400", "0", "2", "5");
+    }
+
+    @Test
+    void rebuild_neverOverwritesCountWithALocalSnapshot() {
+        // 并发的 markDone 可能在重建期间递增计数。重建只能通过脚本做并集并重新数一遍，
+        // 绝不能用调用方算出的 confirmed.size() 直接覆盖 __count__。
+        StringRedisTemplate rawTemplate = mock(StringRedisTemplate.class);
+        when(redis.raw()).thenReturn(rawTemplate);
+        when(rawTemplate.execute(any(), anyList(), any(Object[].class))).thenReturn(7L);
+
+        int count = progressStore.rebuild(FILE_ID, 10, new TreeSet<>(Set.of(0, 2, 5)), Duration.ofHours(24));
+
+        assertThat(count).isEqualTo(7);
+        verify(redis, never()).hSet(eq(PROGRESS_KEY), eq("__count__"), anyString());
     }
 }
