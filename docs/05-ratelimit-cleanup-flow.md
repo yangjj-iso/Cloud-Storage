@@ -1,253 +1,112 @@
-# 链路五：限流、僵尸清理与存储策略
+# 限流、过期清理与存储策略
 
-> 本篇覆盖三个横切关注点：请求限流、过期资源清理、存储抽象。它们不在主流程的"关键路径"上，但对系统的健壮性和可维护性至关重要。
+本章说明上传与下载链路的横切保护：请求频率限制、过期上传会话回收，以及对象存储抽象。它们不改变业务 API 的语义，但决定系统在重试、长期运行和外部依赖异常时的资源边界。
 
-## 一、Redis Lua 令牌桶限流
+## Redis Lua 令牌桶
 
-### 为什么需要限流？
+`RateLimitFilter` 在需要限制的 HTTP 请求进入业务 Controller 前执行。当前配置默认开启，按用户维度为上传分片和下载请求使用 Redis 令牌桶。
 
-分片上传场景下，一个用户可能同时发起上百个并发请求（100 个分片并行上传 = 100 个并发 HTTP 请求）。如果不加限制：
-- 少数活跃用户可能占满后端的所有线程和带宽
-- MinIO 和 Redis 可能被打垮
-- 其他用户的请求被饿死
+| 场景 | 默认速率 | 默认突发容量 | 配置 |
+| --- | --- | --- | --- |
+| 上传分片 | 30 requests/s | 60 | `cloudchunk.rate-limit.upload-chunk-rps/burst` |
+| 文件下载 | 50 requests/s | 100 | `cloudchunk.rate-limit.download-rps/burst` |
+| 公开分享访问 | 1 request/s | 5 | 分享服务的独立限制 |
 
-### 令牌桶算法原理
+令牌桶允许短时突发：空闲期间令牌会补充到容量上限；请求到达时有令牌即放行，无令牌即返回限流响应。它限制的是请求速率，不是上传或下载的字节带宽。
 
-令牌桶就像一个漏水的桶，但反过来——桶里装的是"令牌"（许可证）：
+### 为什么使用 Lua
 
-1. **匀速补充**：系统以固定速率（rate）向桶里放令牌，比如每秒放 30 个
-2. **突发容量**：桶有上限（capacity），放满了就不再放，比如最多存 60 个
-3. **消费令牌**：每个请求需要从桶里取一个令牌。有令牌就放行，没有就拒绝（429）
-4. **突发允许**：如果桶里存了 60 个令牌（一段时间没请求），短时间内可以突发消费 60 个
+一次获取令牌包含读取桶状态、按时间补充令牌、判断/扣减令牌、更新状态和设置过期时间。若把这些操作拆成多条 Redis 命令，并发请求可能都读取到同一份余额而被错误放行。
 
-**与漏桶算法的区别**：漏桶严格匀速输出（每秒只处理固定数量的请求，多余的排队）；令牌桶允许突发（一瞬间可以消费多个令牌），更适合文件上传这种天然突发的场景。
+Lua 脚本让这组读改写在 Redis 内原子执行，并可只做一次客户端往返。典型状态包括当前令牌数与上次更新时间；键会在足够长的空闲时间后自动过期。
 
-### Lua 脚本详解
+```mermaid
+sequenceDiagram
+  participant R as HTTP 请求
+  participant F as RateLimitFilter
+  participant L as RateLimiter
+  participant Redis
 
-```lua
--- KEYS[1] = 限流 key（per-user），如 cc:rate:upload:12345
--- ARGV[1] = rate（令牌补充速率，tokens/s）
--- ARGV[2] = capacity（桶容量）
--- ARGV[3] = now（当前时间，微秒精度）
-local key = KEYS[1]
-local rate = tonumber(ARGV[1])
-local cap  = tonumber(ARGV[2])
-local now  = tonumber(ARGV[3])
-
--- 读取当前桶状态：tk=当前令牌数，ts=上次操作时间
-local d = redis.call('HMGET', key, 'tk', 'ts')
-local tokens = tonumber(d[1])
-local last   = tonumber(d[2])
-
--- 首次访问：桶满
-if tokens == nil then tokens = cap; last = now end
-
--- ★ 按时间差补充令牌
--- elapsed 是距上次操作过了多少微秒
--- elapsed * rate / 1000000 = 过了这么久应该补充多少令牌
--- math.min(cap, ...) 保证不超过桶容量
-local elapsed = math.max(0, now - last)
-tokens = math.min(cap, tokens + elapsed * rate / 1000000)
-
--- 尝试消费一个令牌
-local allowed = 0
-if tokens >= 1 then
-    tokens = tokens - 1
-    allowed = 1
-end
-
--- 回写状态
-redis.call('HMSET', key, 'tk', tostring(tokens), 'ts', tostring(now))
--- 设置 EXPIRE：长时间不访问的用户自动回收桶
--- cap/rate + 1 = 桶满需要的时间 + 1 秒缓冲
-redis.call('EXPIRE', key, math.ceil(cap / rate) + 1)
-return allowed
+  R->>F: 上传分片/下载
+  F->>L: tryAcquire(user, route)
+  L->>Redis: Lua: refill + consume + expire
+  alt 有令牌
+    Redis-->>L: allowed
+    L-->>F: 放行
+    F->>F: 调用 Controller
+  else 无令牌
+    Redis-->>L: denied
+    L-->>F: 拒绝
+    F-->>R: 429
+  end
 ```
 
-**为什么用 Lua 而不是多次 Redis 命令？** 假设不用 Lua：
-1. `HMGET key tk ts` → 读取桶状态
-2. 在 Java 中计算新令牌数
-3. `HMSET key tk {new} ts {now}` → 写回状态
+未登录请求不会以匿名默认用户绕过用户级限制；需要认证的路由仍由认证过滤器处理。
 
-问题：两个并发请求都在步骤 1 读到 tokens=1，都认为"有令牌"，都在步骤 3 写回 tokens=0。结果两个请求都放行了，但桶里只有 1 个令牌——**竞态条件**。Lua 脚本在 Redis 单线程中原子执行，彻底消除了这个问题。
+## 下载字节限速不是令牌桶
 
-### 限流过滤器
+`RateLimitedInputStream` 由下载服务在代理下载路径上使用。它按读取字节节奏限制响应流，适合管理员通过 `download_speed_limit` 对代理下载带宽进行运行时治理。
 
-```java
-@Component
-@Order(10)  // 在 TraceFilter 之后执行（TraceFilter 解析 userId）
-public class RateLimitFilter extends OncePerRequestFilter {
+| 机制 | 保护对象 | 修改位置 |
+| --- | --- | --- |
+| HTTP 令牌桶 | 单用户请求数量 | `cloudchunk.rate-limit.*` |
+| `RateLimitedInputStream` | 代理下载的数据传输速率 | 管理端 `download_speed_limit` 设置 |
 
-    @Override
-    protected void doFilterInternal(...) {
-        if (!cfg.isEnabled()) { chain.doFilter(request, response); return; }
+预签名直传下载的数据直接由 MinIO 输出，不经过应用响应流，因此不能依赖应用层字节限速控制。
 
-        long userId = UserContext.requireUserId();
+## 上传会话状态与清理
 
-        // 上传分片限流：POST /upload/chunk
-        if ("POST".equalsIgnoreCase(method) && path.contains("/upload/chunk")) {
-            if (!rateLimiter.tryAcquire(
-                    RedisKeys.rateUpload(userId),      // key: cc:rate:upload:{userId}
-                    cfg.getUploadChunkRps(),            // 30 tokens/s
-                    cfg.getUploadChunkBurst())) {       // burst=60
-                uploadRejected.increment();             // Micrometer 计数器
-                reject(response);                      // 返回 429
-                return;
-            }
-        }
+上传会话由 `upload_session`、`chunk_record`、Redis 进度键和对象存储临时分片共同构成。定时清理的目标是回收不再可恢复的会话及其预留资源，而不是删除仍在活跃上传的用户数据。
 
-        // 下载限流：GET /file/*/download
-        if ("GET".equalsIgnoreCase(method) && path.contains("/file/") && path.endsWith("/download")) {
-            if (!rateLimiter.tryAcquire(
-                    RedisKeys.rateDownload(userId),     // key: cc:rate:download:{userId}
-                    cfg.getDownloadRps(),               // 50 tokens/s
-                    cfg.getDownloadBurst())) {           // burst=100
-                downloadRejected.increment();
-                reject(response);
-                return;
-            }
-        }
-
-        chain.doFilter(request, response);
-    }
-}
+```mermaid
+stateDiagram-v2
+  [*] --> RUNNING: init
+  RUNNING --> MERGING: 合并开始
+  RUNNING --> EXPIRED: 取消或超过会话 TTL
+  FAILED --> EXPIRED: 达到清理条件
+  MERGING --> EXPIRED: 过期且超过更新时间宽限
+  MERGING --> MERGED: 合并成功
+  EXPIRED --> [*]: 删除分片、释放引用/预留、清理进度
 ```
 
-**配置在 `application.yml` 中**：
-```yaml
-cloudchunk:
-  rate-limit:
-    enabled: true              # 可一键关闭限流
-    upload-chunk-rps: 30       # 每用户每秒 30 个分片上传请求
-    upload-chunk-burst: 60     # 允许突发 60 个
-    download-rps: 50
-    download-burst: 100
-```
+当前清理策略包括：
 
-> **面试要点**：令牌桶 vs 漏桶的区别是高频面试题。核心区别：**漏桶匀速、令牌桶允许突发**。Lua 脚本的核心价值是**原子性**——多个命令在 Redis 单线程中一次执行完成，消除竞态条件。
+- 周期：`StaleSessionCleanupTask` 约每小时运行。
+- 目标：超期的 `RUNNING`、`FAILED` 会话，以及长时间未更新且超过宽限期的 `MERGING` 会话。
+- 顺序：清理临时分片；以条件更新将会话转为 `EXPIRED`；只有状态转换成功的执行者才释放引用、配额预留和 Redis 进度。
+- 幂等性：状态条件更新避免多个实例或多次扫描对同一会话重复释放配额。
 
----
+合并成功的会话不应由该任务当作僵尸上传删除；后续校验和媒体处理有自己的状态与补偿路径。
 
-## 二、僵尸分片清理
+## 存储策略
 
-### 什么是僵尸分片？
+`cloudchunk-storage` 通过 `StorageStrategy` 隔离对象存储差异。业务层通过统一的读、写、删除、复制、合并、范围读取和预签名能力调用当前策略。
 
-用户开始上传一个 1GB 文件（100 片），传了 60 片后放弃了（关掉浏览器、永远不再回来）。这 60 个分片对象永远留在 MinIO 上，Redis 里的进度 Hash 永远不会被清理——这就是"僵尸"。
+| 策略 | 状态 | 说明 |
+| --- | --- | --- |
+| `minio` | 已实现 | 默认策略，支持分片对象、Compose、预签名 URL 与范围读取 |
+| `local` | 已实现 | 将对象写入本地根目录，适合开发或单机环境 |
+| `oss` | 扩展预留 | 枚举存在，但仓库中没有阿里云 OSS 策略实现 |
 
-长期积累下来，会造成：
-- MinIO 存储空间被无用数据占满
-- Redis 内存被过期进度 Hash 占用（如果没设 TTL 或 TTL 很长）
-- MySQL upload_session 表里堆积大量 RUNNING 状态的无用记录
+策略由 `cloudchunk.storage.type` 选择，默认 `minio`。MinIO 配置包含 endpoint、access key、secret key、bucket、region 与安全连接选项；本地策略使用 `cloudchunk.storage.local.root` 和 `base-url`。
 
-### 清理策略
+### Compose 的批次边界
 
-`StaleSessionCleanupTask` 每小时执行一次，扫描 MySQL 中"状态为 RUNNING/MERGING 但已过期"的上传会话：
+`cloudchunk.storage.compose-batch-size` 默认值为 1000。它为大量分片的服务端组合提供批处理边界；最终限制仍由实际 MinIO 版本、对象大小和部署配置决定。文档不将该值解释为单文件大小或吞吐承诺。
 
-```java
-@Scheduled(fixedDelay = 3600_000, initialDelay = 60_000)
-public void cleanup() {
-    LocalDateTime now = LocalDateTime.now();
-    // 查找过期会话：status IN (RUNNING, MERGING) AND expire_at < NOW()
-    // expire_at 在创建会话时设置，默认 24 小时后过期
-    List<UploadSession> stale = sessionMapper.selectList(
-            new LambdaQueryWrapper<UploadSession>()
-                    .in(UploadSession::getStatus, RUNNING, MERGING)
-                    .lt(UploadSession::getExpireAt, now)
-                    .last("limit 100"));    // 每次最多处理 100 个，避免单次执行过久
+## 外部依赖异常
 
-    for (UploadSession s : stale) {
-        try {
-            cleanOne(s);
-        } catch (Exception e) {
-            log.warn("cleanup failed for fileId={}", s.getFileId(), e.getMessage());
-            // 单个失败不影响其他会话的清理
-        }
-    }
-}
+| 外部系统 | 失败影响 | 当前保护方向 |
+| --- | --- | --- |
+| Redis | 限流、临时进度、缓存和锁受影响 | 持久化分片记录与对象存储可用于续传重建；认证/业务仍按各服务的故障策略处理 |
+| MinIO/本地存储 | 分片写入、合并、下载或预览失败 | 返回存储业务错误；不把未确认分片计为完成 |
+| MySQL | 会话、引用、配额和状态无法更新 | 业务请求失败；不以 Redis 状态替代持久化状态 |
+| RocketMQ | 校验/媒体处理投递延后 | 文件状态与补偿任务负责后续恢复，不能假定消息永远立即送达 |
 
-private void cleanOne(UploadSession s) {
-    // Step 1: 清除 Redis 进度（即使 Redis key 已因 TTL 过期自动消失，调用也是幂等的）
-    progressStore.clear(s.getFileId());
+## 运维检查
 
-    // Step 2: 批量删除 MinIO 上的分片对象
-    List<String> partKeys = new ArrayList<>(s.getChunkTotal());
-    for (int i = 0; i < s.getChunkTotal(); i++) {
-        partKeys.add(ObjectKeyUtils.partKey(s.getFileId(), i));
-    }
-    try {
-        storageFactory.current().deleteBatch(s.getBucket(), partKeys);
-    } catch (Exception e) {
-        log.warn("delete stale parts failed: fileId={}", s.getFileId(), e.getMessage());
-        // 删除失败不能标记 EXPIRED，否则 DB 不再进入清理扫描，临时对象会失去重试入口。
-        throw e;
-    }
-
-    // Step 3: CAS 更新 DB 状态（只有仍为 RUNNING/MERGING 的才标记 EXPIRED）
-    sessionMapper.update(null, new LambdaUpdateWrapper<UploadSession>()
-            .eq(UploadSession::getFileId, s.getFileId())
-            .in(UploadSession::getStatus, RUNNING, MERGING)
-            .set(UploadSession::getStatus, UploadSessionStatus.EXPIRED));
-}
-```
-
-**CAS 条件更新的作用**：假设清理任务在删除 MinIO 分片的过程中，用户恰好回来续传并完成了上传。如果不加条件直接 `SET status=EXPIRED`，就会把已完成的会话标记为过期。加了 `IN (RUNNING, MERGING)` 条件后，如果会话已经变成 COMPLETED，更新不会生效。
-
----
-
-## 三、存储策略模式
-
-### 为什么用策略模式？
-
-不同的客户可能用不同的对象存储：
-- 开发环境用 MinIO（本地自建）
-- 生产环境用阿里云 OSS
-- 某些场景用本地磁盘
-
-如果存储操作散布在业务代码各处（`if (type == "minio") { ... } else if (type == "oss") { ... }`），每次新增一种存储就要改一堆业务代码。策略模式把存储操作抽象成接口，业务代码只依赖接口，具体实现通过配置切换。
-
-### 接口设计
-
-```java
-public interface StorageStrategy {
-    String type();                                        // "minio" / "local" / "oss"
-    PutResult put(PutRequest request);                    // 写对象
-    InputStream get(GetRequest request);                  // 读对象（完整）
-    RangeStream getRange(GetRangeRequest request);        // 读对象（Range）
-    ComposeResult compose(ComposeRequest request);        // 服务端合并
-    String presignDownload(String bucket, String key, Duration ttl);  // 下载签名
-    default String presignUpload(...) { throw ... }       // 上传签名（可选）
-    default void copy(...) { throw ... }                  // 服务端拷贝（可选）
-    void delete(String bucket, String key);               // 删对象
-    void deleteBatch(String bucket, List<String> keys);   // 批量删
-    boolean exists(String bucket, String key);            // 存在性检查
-    ObjectStat stat(String bucket, String key);           // 对象元信息
-    List<ObjectStat> list(String bucket, String prefix, int max); // 列举对象
-}
-```
-
-**`default` 方法**的设计：`presignUpload` 和 `copy` 不是所有存储都支持（本地磁盘没有"预签名 URL"的概念）。用 `default` 方法提供默认的"抛异常"实现，只有支持该能力的存储（如 MinIO）才覆盖。业务代码调用前可以检查 `type()` 决定是否使用这些方法。
-
-### 切换方式
-
-```yaml
-cloudchunk:
-  storage:
-    type: ${STORAGE_TYPE:minio}      # minio / local / oss
-    default-bucket: ${STORAGE_BUCKET:cloudchunk}
-    minio:
-      endpoint: http://127.0.0.1:9002
-      access-key: minioadmin
-      secret-key: minioadmin
-    local:
-      root: ./local-storage
-      base-url: http://localhost:8080/api/v1/file
-```
-
-`StorageStrategyFactory` 根据 `type` 配置注入对应的实现。业务代码通过 `storageFactory.current()` 获取当前策略实例：
-
-```java
-StorageStrategy storage = storageFactory.current();
-storage.put(request);       // 不关心底层是 MinIO 还是本地磁盘
-```
-
-> **面试要点**：策略模式是设计模式面试的经典题。这里的 `StorageStrategy` 体现了 **OCP 原则**（开闭原则）：对扩展开放（新增 AliyunOssStorageStrategy），对修改关闭（不需要改 UploadService 的任何代码）。面试官追问"怎么新增一种存储"，回答：**实现 StorageStrategy 接口 + 注册到 StorageStrategyFactory + 在 application.yml 配置 type 即可**。
+1. 确认 `cloudchunk.rate-limit.enabled` 是否符合当前环境容量。
+2. 监控过期会话数量、临时对象数量和配额释放是否同步。
+3. 本地策略只适合共享卷或单实例场景；多实例部署应选择共享对象存储。
+4. 更换存储类型前验证预签名、范围读取、复制和 compose 是否都由目标策略实现。
+5. 不把 `oss` 配置为生产存储类型，除非先提供并验证对应策略实现。

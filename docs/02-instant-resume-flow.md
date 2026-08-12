@@ -1,196 +1,112 @@
-# 链路二：秒传与断点续传详解
+# 秒传、共享会话与断点续传
 
-> 秒传和断点续传是 CloudChunk 的两大核心用户体验优化。本篇详细解析它们的实现原理和三级可靠性保障。
+CloudChunk 以文件内容 MD5 为入口优化上传，但 MD5 命中并不意味着所有场景都会直接秒传。当前实现会区分可复用物理文件、运行中会话和新的上传请求，并把用户配额与逻辑文件节点一并处理。
 
-## 一、秒传（Instant Upload）
+## 三种初始化结果
 
-### 什么是秒传？
+`POST /api/v1/upload/init` 基于文件 MD5、大小和状态返回 `INSTANT`、`RESUME` 或 `UPLOAD`。
 
-秒传的本质是**基于内容的去重**：如果服务器上已经存在一个内容完全相同的文件，就不需要再上传一次了。"完全相同"的判断依据是整文件 MD5。
-
-举个例子：用户 A 上传了一个 500MB 的视频，用户 B 后来也要上传同一个视频。如果没有秒传，B 需要等待 500MB 的上传完成；有了秒传，B 在 init 阶段就能得知"这个文件已经有了"，整个过程耗时只有一次 HTTP 请求的时间（~50ms），对用户来说就是"瞬间完成"。
-
-### 秒传流程
-
-```
-前端                              后端
- │                                 │
- │── POST /upload/init ──────→     │
- │   { fileMd5: "d41d8cd..." }     │
- │                                 │
- │                                 │── ① Redis SETNX 加锁
- │                                 │   key: cc:upload:lock:{fileMd5}
- │                                 │   目的：防止并发 init 同一 MD5
- │                                 │
- │                                 │── ② 查 file_meta 表
- │                                 │   WHERE file_md5 = 'd41d8cd...'
- │                                 │   AND status = 'AVAILABLE'
- │                                 │   命中！→ fileId = "abc123"
- │                                 │
- │                                 │── ③ 引用计数 +1
- │                                 │   UPDATE file_meta
- │                                 │   SET ref_count = ref_count + 1
- │                                 │   WHERE file_id = 'abc123'
- │                                 │
- │                                 │── ④ 释放锁
- │                                 │
- │  ←── { mode: "INSTANT",    ─────│
- │        fileId: "abc123",        │
- │        url: "https://minio..." }│
- │                                 │
- │   前端直接显示"上传成功"         │
- │   不上传任何字节                 │
+```mermaid
+flowchart TD
+  Init[上传初始化] --> Available{存在 AVAILABLE 同 MD5?}
+  Available -->|是| Instant[INSTANT]
+  Available -->|否| Running{存在 RUNNING 同 MD5/大小会话?}
+  Running -->|是| Resume[RESUME]
+  Running -->|否| Upload[UPLOAD]
+  Instant --> Ref[建立用户引用、预留配额、创建网盘节点]
+  Resume --> Join[加入或恢复会话，返回完成分片]
+  Upload --> New[新建会话、进度与用户引用]
 ```
 
-### 核心代码解析
+| 模式 | 条件 | 结果 |
+| --- | --- | --- |
+| `INSTANT` | 找到相同 MD5 且状态为 `AVAILABLE` 的 `file_meta` | 用户获得引用和逻辑文件节点，不再传输分片 |
+| `RESUME` | 找到相同 MD5 与文件大小、仍处于可恢复状态的上传会话 | 返回同一会话与已完成分片，可由多个用户参与 |
+| `UPLOAD` | 没有可复用文件或会话 | 创建新的上传会话 |
 
-```java
-var instant = fileMetaService.findAvailableByMd5(req.getFileMd5());
-if (instant.isPresent()) {
-    FileMeta m = instant.get();
-    // 不创建新文件，只增加引用计数。
-    // 引用计数的作用：当所有引用这个文件的用户都"删除"了它，ref_count 降到 0 时才真正删除存储对象。
-    fileMetaService.incRefCount(m.getFileId());
-    String url = storageFactory.current()
-            .presignDownload(m.getBucket(), m.getObjectKey(), sessionTtl);
-    return InitUploadResponse.instant(m.getFileId(), url);
-}
+秒传、加入会话和新建上传均会走 `QuotaService` 的原子预留逻辑。对于已经拥有该文件引用的用户，业务会避免重复计入配额。合并成功不会再次增加配额。
+
+## 秒传的对象模型
+
+秒传不是简单地返回一个 URL。物理文件和用户文件分开建模：
+
+| 模型 | 责任 |
+| --- | --- |
+| `file_meta` | 物理对象的 MD5、对象键、MIME、大小和可用状态 |
+| `file_reference` | 用户与物理文件之间的引用或上传参与关系 |
+| `user_file` | 用户目录树中的可见节点 |
+| `user_quota` | 当前用户已预留/已使用的空间和文件数 |
+
+可复用文件命中后，服务会增加引用、预留空间并创建根目录 `user_file`。因此秒传用户仍然通过自己的目录节点访问文件，不会直接暴露另一个用户的节点或存储路径。
+
+MD5 在这里是内容去重标识，不是安全校验或权限凭据。服务仅复用状态为 `AVAILABLE` 的物理对象；合并中、损坏或已删除文件不能用于秒传。
+
+## 共享上传会话
+
+当没有可用的完整文件，但已有同 MD5 和大小的运行中会话时，后续用户不必重复上传同一内容。服务以 `file_reference` 记录参与者，每位参与者单独预留配额；合并完成后会为全部参与者创建逻辑文件节点。
+
+这条路径的价值是避免并发上传相同大文件时创建多套临时分片。它不等价于“所有同名文件共享”，匹配条件仍基于内容 MD5 与大小。
+
+## 断点续传的可信来源
+
+分片进度存在三层来源，查询和恢复时按成本从低到高使用：
+
+| 层级 | 数据 | 作用 |
+| --- | --- | --- |
+| Redis | `cc:upload:progress:{fileId}` | 正常续传时快速读取已完成索引 |
+| MySQL | `chunk_record` | Redis 丢失后的持久化分片记录 |
+| 存储 | 临时分片对象列表 | 确认对象真实存在，作为最终兜底 |
+
+恢复过程的核心是：MySQL 中完成的索引只有在对象存储中仍存在对应临时对象时才会被视为完成。确认后的索引会重新写入 Redis，后续请求回到快速路径。
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant U as UploadService
+  participant R as Redis
+  participant DB as MySQL
+  participant O as 对象存储
+
+  C->>U: init(相同 MD5/大小)
+  U->>R: 读取 progress
+  alt Redis 有进度
+    R-->>U: 已完成索引
+  else Redis 无进度
+    U->>DB: 查询 DONE chunk_record
+    U->>O: 列出临时分片
+    O-->>U: 存在的索引
+    U->>U: 取 DB 与对象存储交集
+    U->>R: 重建 progress
+  end
+  U-->>C: RESUME + uploaded/missing
 ```
 
-### 为什么需要 Redis 锁？
+## 分片级去重
 
-设想没有锁的场景：
-1. 用户 A 发起 init（fileMd5="abc"）→ 查 file_meta → 未命中 → 准备创建新会话
-2. 用户 B 也发起 init（fileMd5="abc"）→ 查 file_meta → 未命中 → 也准备创建新会话
-3. A 和 B 都创建了各自的 UploadSession → 同一个文件被上传了两次 → 浪费存储
+客户端在恢复/共享会话中会把仍缺失的分片 MD5 提交到 `/api/v1/upload/dedup/{fileId}`。服务端寻找其他完成分片；命中后通过存储策略内部复制临时对象，并将当前会话该索引标为完成。
 
-加锁后：
-1. A 获取锁 → 查询 → 未命中 → 创建会话 → 释放锁
-2. B 尝试获取锁 → 等待（或失败） → A 上传完成 → B 重新 init → 秒传命中
+- 复制发生在对象存储侧，文件内容不经过浏览器或应用进程。
+- 该优化只减少命中分片的传输；未命中或去重失败时客户端正常上传。
+- 分片级去重不同于整文件秒传：前者允许只复用部分内容。
 
-> **面试要点**：秒传的核心是 `MD5 去重 + 引用计数`。面试官可能追问"MD5 会碰撞吗"，回答：理论上会，但概率极低（2^128 ≈ 3.4×10^38），实际工程中 MD5 去重是业界标准做法（百度网盘、阿里云盘都这么做）。如果面试官对安全性敏感，可以补充"后续可以升级为 SHA-256 或 MD5+文件大小联合去重"。
+## 前端 IndexedDB 的作用与边界
 
----
+前端会写入两类 IndexedDB 数据：
 
-## 二、断点续传（Resume Upload）
+- 文件与分片 MD5 缓存，用于再次选择相同文件时跳过重复哈希。
+- 上传过程快照，用于保留 `fileId`、分片计划和局部进度。
 
-### 什么是断点续传？
+当前页面没有读取快照并自动恢复任务的完整流程。用户需要重新选择同一文件触发 `init`，后端根据上述三层来源返回可信进度。不要将 IndexedDB 快照描述为已经实现“打开页面后自动续传”。
 
-用户上传一个大文件，传到一半时网络断了（或者关掉了浏览器）。重新打开页面后拖入同一个文件，系统应该从断点继续上传，而不是从头来过。
+## 失败与一致性边界
 
-断点续传的关键在于**进度记录**：后端需要知道哪些分片已经上传成功了。CloudChunk 用三级存储保障进度不丢失。
+| 场景 | 处理 |
+| --- | --- |
+| 重复分片上传 | Redis Lua 仅首次索引计数，数据库记录保持幂等 |
+| Redis 重启或过期 | 由 MySQL 与对象存储重建进度 |
+| 临时对象缺失 | 该索引重新进入 `missing`，客户端重传 |
+| 会话取消/过期 | 临时对象、引用和配额预留由取消/清理逻辑处理 |
+| 合并后校验失败 | 标记 `BROKEN` 并删除错误对象，不自动要求浏览器重传 |
+| MD5 碰撞风险 | 当前去重协议以 MD5 为内容键；如业务需要抗碰撞保证，应演进为更强哈希或联合校验字段 |
 
-### 三级可靠性设计
-
-```
-                 查询速度      可靠性     恢复场景
-┌──────────────┐
-│ Level 1:     │  毫秒级       中        正常断点续传
-│ Redis Hash   │  (O(1))      (内存，    （网络中断后重新上传）
-│              │               重启丢失)
-├──────────────┤
-│ Level 2:     │  百毫秒级     高        Redis 宕机后恢复
-│ MySQL        │  (索引查询)   (持久化)
-│ chunk_record │
-├──────────────┤
-│ Level 3:     │  秒级         最高       MySQL 数据不一致时
-│ MinIO        │  (list API)   (对象存储   兜底确认
-│ list objects │               本身可靠)
-└──────────────┘
-```
-
-### 进度加载代码
-
-当用户重新 init 时，后端发现有未过期的 RUNNING 会话，就进入续传分支：
-
-```java
-private List<Integer> loadOrRebuildUploaded(UploadSession s) {
-    // Level 1：尝试从 Redis 读取
-    List<Integer> uploaded = progress.uploaded(s.getFileId());
-    if (!uploaded.isEmpty()) return uploaded;   // 命中，毫秒级返回
-
-    // Level 2：Redis 丢失（重启/内存淘汰）→ 从 MySQL 读取
-    Set<Integer> db = new TreeSet<>();
-    chunkMapper.selectList(new LambdaQueryWrapper<ChunkRecord>()
-            .eq(ChunkRecord::getFileId, s.getFileId())
-            .eq(ChunkRecord::getStatus, ChunkStatus.DONE))
-            .forEach(r -> db.add(r.getChunkIndex()));
-    if (db.isEmpty()) return List.of();
-
-    // Level 3：与 MinIO 实际存在的对象取交集
-    // 为什么取交集？因为 DB 记录了"后端认为成功了"，但 MinIO 对象可能因为磁盘故障丢失了。
-    // 只有 DB 和 MinIO 都确认存在的分片才算真正完成。
-    Set<Integer> confirmed = new TreeSet<>(db);
-    try {
-        var list = storageFactory.current().list(bucket, partPrefix, 20000);
-        Set<Integer> store = new TreeSet<>();
-        list.forEach(it -> {
-            int idx = ObjectKeyUtils.parsePartIndex(it.objectKey());
-            if (idx >= 0) store.add(idx);
-        });
-        confirmed.retainAll(store);  // 交集 = 最终可信的已完成分片
-    } catch (Exception e) {
-        log.warn("list storage for rebuild failed", e);
-    }
-
-    // 重建 Redis 进度
-    progress.rebuild(s.getFileId(), s.getChunkTotal(), confirmed, sessionTtl);
-    return new ArrayList<>(confirmed);
-}
-```
-
-### 前端断点恢复
-
-前端也有自己的断点记忆机制——基于 IndexedDB：
-
-```typescript
-// 每上传 10 片，持久化一次进度到 IndexedDB
-if (idx % 10 === 0 || cursor >= indices.length) {
-  const doneSet = [...uploaded];
-  for (let j = 0; j < cursor; j++) doneSet.push(indices[j]);
-  saveUploadState({
-    fileId, fileMd5, fileName, fileSize,
-    chunkSize, chunkTotal,
-    uploadedChunks: doneSet,
-    savedAt: Date.now(),
-  }).catch(() => {});
-}
-```
-
-前端的 IndexedDB 记录主要用于**关闭标签页后恢复**。下次打开页面时，前端先查 IndexedDB 是否有未完成的上传任务，有的话自动恢复（而不需要用户重新拖入文件）。但最终的可信进度仍以后端 Redis/MySQL 为准。
-
----
-
-## 三、分片级去重（Chunk Dedup）
-
-这是一个更细粒度的优化：即使整文件 MD5 不匹配（秒传未命中），部分分片的内容可能和其他文件的分片相同。
-
-例如：用户上传 v1.zip（100 片），后来修改了几个文件，重新打包为 v2.zip（100 片）。v2 的大部分分片和 v1 是完全相同的，只有被修改的部分不同。
-
-```java
-public List<Integer> dedupChunks(String fileId, Map<Integer, String> chunkMd5Map) {
-    List<Integer> deduped = new ArrayList<>();
-    for (Map.Entry<Integer, String> entry : chunkMd5Map.entrySet()) {
-        int idx = entry.getKey();
-        String md5 = entry.getValue();
-
-        // 查找其他会话中相同 MD5 的已完成分片
-        ChunkRecord existing = chunkMapper.selectOne(
-            ...eq(ChunkRecord::getChunkMd5, md5)
-            ...eq(ChunkRecord::getStatus, ChunkStatus.DONE)
-            ...ne(ChunkRecord::getFileId, fileId)...);
-
-        if (existing != null) {
-            // ★ 服务端拷贝：MinIO 内部复制，不下载到 Java 进程
-            storage.copy(bucket, srcPartKey, bucket, dstPartKey);
-            progress.markDone(fileId, idx, sessionTtl);
-            deduped.add(idx);
-        }
-    }
-    return deduped;
-}
-```
-
-**关键**：`storage.copy()` 是 MinIO 服务端操作，数据在对象存储内部复制，不经过 Java 进程。相当于"秒传"在分片级别的应用。
-
-> **面试要点**：三级可靠性是高频面试题。面试官问"Redis 挂了断点续传还能工作吗"，回答：**可以，从 MySQL + MinIO 重建进度**。追问"为什么还要和 MinIO 取交集"，回答：**防止 DB 记录成功但 MinIO 对象丢失的极端情况**。
+完整分片、合并和自动合并行为见 [01 分片上传](./01-upload-flow.md)；配额和逻辑文件生命周期见 [06 网盘、分享与配额](./06-drive-share-quota-flow.md)。

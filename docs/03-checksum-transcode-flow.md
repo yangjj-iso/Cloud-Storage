@@ -1,210 +1,85 @@
-# 链路三：异步校验与转码管道详解
+# 校验与媒体处理
 
-> 文件合并只是上传的结束，不是文件"可用"的开始。合并后的文件还需要经过 MD5 校验和媒体转码，才能真正对外提供服务。本篇详解这条异步管道的设计。
+合并完成并不表示文件已经可供普通下载。CloudChunk 先把物理对象置为 `MERGED`，随后通过 RocketMQ 异步校验整文件 MD5；校验通过后才变为 `AVAILABLE`，并投递媒体处理任务。
 
-## 一、为什么校验和转码要异步？
+## 状态与消息链路
 
-### 问题：如果合并时同步校验
-
-假设用户上传了一个 1GB 的视频文件。合并完成后如果同步做 MD5 校验（需要读取整个 1GB 文件计算 MD5）和视频转码（FFmpeg 抽首帧），整个合并接口的响应时间可能超过 30 秒。
-
-这会导致：
-1. **前端超时**：浏览器默认 60 秒超时，大文件场景经常触发
-2. **连接池耗尽**：合并接口长时间占用线程和数据库连接
-3. **用户体验差**：用户看着进度条卡在 "合并中…" 不动
-
-### 解决方案：RocketMQ 解耦
-
-将校验和转码设计为异步消息：合并成功后立即返回给前端"已合并"，同时发送一条消息到 RocketMQ。后台消费者接收消息后异步执行校验和转码。这样上传接口的 TP99 不受校验/转码耗时影响。
-
-```
-时间线：
-├─ 合并（11ms，MinIO ComposeObject）──→ 返回前端"已合并" 
-│
-├─ [异步] 校验（秒级，读取整文件算 MD5）──→ 标记为"可用"
-│
-└─ [异步] 转码（分钟级，FFmpeg 处理）──→ 生成缩略图/封面
+```mermaid
+flowchart LR
+  Merge[MinIO Compose 成功] --> Merged[file_meta: MERGED]
+  Merged --> Outbox[event_outbox]
+  Outbox --> ChecksumTopic[Checksum 消息]
+  ChecksumTopic --> Verify[流式读取并计算 MD5]
+  Verify -->|一致| Available[file_meta: AVAILABLE]
+  Verify -->|不一致| Broken[file_meta: BROKEN]
+  Available --> TranscodeOutbox[event_outbox]
+  TranscodeOutbox --> TranscodeTopic[Transcode 消息]
+  TranscodeTopic --> Image[图片缩略图]
+  TranscodeTopic --> Video[视频封面]
+  TranscodeTopic --> Document[文档文本提取]
 ```
 
----
+`ChecksumRequested`、`TranscodeRequested` 等稳定契约位于 `cloudchunk-contract`。业务事务只写 Outbox；`cloudchunk-mq` 的 Worker 负责投递 RocketMQ 并消费校验事件，媒体消费者位于 `cloudchunk-transcode`。
 
-## 二、校验流程
+## 整文件 MD5 校验
 
-### 为什么要二次校验？
+合并成功后，服务端从存储策略读取完整对象并以流式方式计算 MD5。该过程不会将完整文件一次性读入 JVM 堆。
 
-前端上传前已经计算了整文件 MD5，为什么合并后还要再算一次？
+| 结果 | 文件状态 | 后续动作 |
+| --- | --- | --- |
+| 实际 MD5 与初始化 MD5 相同 | `AVAILABLE` | 投递媒体处理消息 |
+| MD5 不一致 | `BROKEN` | 写损坏事件并把错误对象加入持久化 GC 队列 |
+| 找不到元数据或已可用 | 不重复处理 | 校验消费者幂等返回 |
 
-原因是**分片传输可能出错**。虽然每个分片上传时都有 MD5 校验，但合并后的文件 MD5 可能和原始文件不同，例如：
-- 分片顺序被打乱（理论上不会，但极端 bug 场景下可能）
-- MinIO ComposeObject 内部数据损坏（极罕见但不是零概率）
-- 某个分片的 MD5 校验被跳过（比如 Presigned PUT 直传路径只信任前端传来的 MD5）
+状态流转和对象回收都在发布端的同一个事务里完成，因此 `BlobBroken` 消息本身只承担告警职责：`BrokenBlobConsumer`（消费者组 `CG-broken-notify`）经 Inbox 幂等后输出结构化错误日志，并按归类后的原因累加 `cloudchunk_blob_broken_total` 指标，供 Prometheus 告警使用。原始 reason 里可能带 MD5 等高基数内容，不会直接作为指标标签。
 
-二次校验是最终的**数据完整性保障**。
+当前协议没有自动要求浏览器重传文件的机制。用户重新上传同一内容时会重新走初始化和会话决策。
 
-### 校验核心代码
+## 为什么异步
 
-```java
-// ChecksumService.verify() — 合并后的整文件 MD5 校验
-public void verify(ChecksumMessage msg) {
-    FileMeta meta = fileMetaService.findById(msg.getFileId()).orElse(null);
-    if (meta == null) return;                                  // 元数据缺失，跳过
-    if (meta.getStatus() == FileStatus.AVAILABLE) return;      // 已校验过（幂等）
+MinIO Compose 只负责在对象存储内拼接分片。整文件校验仍需要读取整个对象，图片处理、视频封面和文档解析也可能耗时较长。将它们从 `merge` 请求剥离可以避免把对象读取与外部工具执行放在用户的 HTTP 请求中。
 
-    // ★ 从 MinIO 流式读取合并后的整文件，边读边算 MD5
-    // 不是 readAllBytes() 到内存再算，而是流式计算，内存占用 O(1)
-    String actual;
-    try (InputStream in = storageFactory.current()
-            .get(new GetRequest(msg.getBucket(), msg.getObjectKey()))) {
-        actual = Md5Utils.md5(in);
-    }
+这不代表合并接口的任何固定延迟承诺。实际耗时取决于对象大小、存储网络、队列积压、CPU、FFmpeg 和文档格式。
 
-    if (!actual.equalsIgnoreCase(msg.getExpectMd5())) {
-        // ★ MD5 不匹配 → 三步处理
-        // 1. 标记文件状态为 BROKEN
-        fileMetaService.updateStatus(msg.getFileId(), FileStatus.BROKEN);
-        // 2. 发送损坏通知（可对接告警系统）
-        brokenProducer.publish(BrokenMessage.of(msg.getFileId(), "md5 mismatch"));
-        // 3. 删除 MinIO 上的错误对象（避免占用存储空间）
-        storageFactory.current().delete(msg.getBucket(), msg.getObjectKey());
-        return;
-    }
+## 媒体处理类型
 
-    // MD5 匹配 → 文件状态从 MERGED 升级为 AVAILABLE（可用）
-    fileMetaService.updateStatus(msg.getFileId(), FileStatus.AVAILABLE);
+| MIME 类别 | 当前消费者 | 当前产物/行为 | 说明 |
+| --- | --- | --- | --- |
+| 图片 | `ImageTranscodeConsumer` | 多尺寸缩略图 | 使用 Thumbnailator，尺寸来自 `cloudchunk.transcode.image.sizes` |
+| 视频 | `VideoTranscodeConsumer` | 首帧封面 | 使用 FFmpeg 抽帧；当前不进行 H.264 重新编码或完整视频转码 |
+| 文档 | `DocTranscodeConsumer` | 文本信息提取 | 使用 Apache Tika |
 
-    // 投递转码消息
-    TranscodeMessage t = new TranscodeMessage();
-    t.setFileId(msg.getFileId());
-    t.setMimeType(msg.getMimeType());
-    // ...
-    try {
-        transcodeProducer.publish(t);
-    } catch (Exception e) {
-        // ★ 转码消息发送失败不会阻断校验流程
-        // TranscodeCompensationTask 会定时扫描 AVAILABLE + NONE 的记录补发
-        log.warn("transcode produce failed (non-fatal): {}", msg.getFileId(), e);
-    }
-}
-```
+处理记录通过 `transcode_record` 与文件元数据关联。前端文件详情会读取预览与处理状态，但并不保证每种 MIME 都有可展示产物。
 
-**关键设计**：转码消息发送失败只记 warn 日志，不抛异常。因为校验是必须成功的核心流程，不能因为转码消息发送失败而回滚校验结果。遗漏的转码会被 `TranscodeCompensationTask` 补偿。
+## 幂等、重试与补偿
 
----
+媒体消费者继承公共处理流程：领取 Inbox、创建带事件幂等键的任务记录、调用类别实现、保存结果或失败状态。消息消费者的重试由 RocketMQ 配置与消费结果驱动；失败处理还受到以下机制补充：
 
-## 三、转码消费者 —— 模板方法模式
+- `event_outbox` 通过领取、失败退避和陈旧锁回收保证至少一次投递。
+- `event_inbox` 与 `(event_id, task_type)` 唯一键阻止重复消费产生重复副作用。
+- 校验与转码补偿任务只补写 Outbox，不在业务事务中直连 MQ。
+- 转码失败会写入失败状态，管理端和 API 可查询并通过 `POST /api/v1/transcode/{fileId}/retry` 请求重试。
+- 图片、视频和文档分别使用独立的死信消费者组，避免一个组错误订阅其他类别的 DLQ。
 
-### 设计模式选择
+## API 与前端覆盖
 
-转码有三种类型（图片、视频、文档），它们的处理流程高度相似：
-1. 幂等检查（是否已处理过）
-2. 更新状态为 RUNNING
-3. 执行具体转码逻辑（不同类型不同实现）
-4. 回写结果到 file_meta
-5. 标记为 SUCCESS 或 FAILED
+| 接口 | 行为 | 当前 Web 覆盖 |
+| --- | --- | --- |
+| `GET /api/v1/transcode/{fileId}` | 查询文件的媒体处理状态 | 通过文件详情/预览间接展示 |
+| `POST /api/v1/transcode/{fileId}/retry` | 请求重新处理 | 当前页面未提供完整操作入口 |
+| `GET /api/v1/file/{fileId}/thumbnail` | 获取缩略图 | 已用于文件展示 |
+| `GET /api/v1/preview/{userFileId}` | 以用户文件节点获取预览信息 | 已接入文件详情 |
 
-这就是经典的**模板方法模式**（Template Method Pattern）：在抽象父类中定义流程骨架，把可变的部分留给子类实现。
+## 相关配置
 
-### 抽象消费者
+| 配置 | 默认值 | 含义 |
+| --- | --- | --- |
+| `cloudchunk.transcode.ffmpeg-path` | `ffmpeg` | FFmpeg 可执行文件路径 |
+| `cloudchunk.transcode.video-task-timeout` | 30 分钟 | 视频封面任务超时边界 |
+| `cloudchunk.transcode.video-max-duration-seconds` | 7200 | 视频处理允许的最大时长 |
+| `cloudchunk.transcode.image.sizes` | 200、600、1200 | 图片缩略图尺寸 |
+| `cloudchunk.transcode.image.quality` | 0.85 | 图片输出质量 |
 
-```java
-public abstract class AbstractTranscodeConsumer implements RocketMQListener<TranscodeMessage> {
-    // 子类必须实现的两个方法
-    protected abstract String taskType();          // "image" / "video" / "doc"
-    protected abstract TranscodeResult doTranscode(TranscodeMessage msg) throws Exception;
+生产环境应确保队列、FFmpeg 可执行文件和对象存储访问均可用。若不需要媒体处理，应在部署设计中明确禁用或隔离对应消费者，而不是将 `MERGED` 文件直接当作 `AVAILABLE` 文件使用。
 
-    @Override
-    public void onMessage(TranscodeMessage msg) {
-        // ① 幂等检查：Redis key cc:transcode:done:{fileId}:{type}
-        String doneKey = RedisKeys.transcodeDone(msg.getFileId(), taskType());
-        if (Boolean.TRUE.equals(redis.hasKey(doneKey))) return;
-
-        // ② 更新状态 + 记录 TranscodeRecord
-        fileMetaService.updateTranscodeStatus(msg.getFileId(), TranscodeStatus.RUNNING);
-        TranscodeRecord record = newRecord(msg);
-        recordMapper.insert(record);
-
-        try {
-            // ③ 子类执行具体转码逻辑
-            TranscodeResult result = doTranscode(msg);
-
-            // ④ 成功：回写结果
-            fileMetaService.updateExtra(msg.getFileId(), extraJson, result.getThumbnailUrl());
-            fileMetaService.updateTranscodeStatus(msg.getFileId(), TranscodeStatus.SUCCESS);
-            redis.set(doneKey, "1", Duration.ofDays(7));  // 标记完成防重
-        } catch (TranscodeException te) {
-            // ⑤ 可重试异常：检查重试次数
-            boolean giveUp = !te.isRetryable() || currentRetry >= MAX_RETRY_BEFORE_GIVE_UP;
-            if (!giveUp) {
-                throw te;   // 重新抛出让 RocketMQ 重投
-            }
-            // 超过最大重试次数 → 放弃，标记 FAILED
-            fileMetaService.updateTranscodeStatus(msg.getFileId(), TranscodeStatus.FAILED);
-        } catch (Exception e) {
-            // ⑥ 不可重试异常 → 直接标记 FAILED
-            fileMetaService.updateTranscodeStatus(msg.getFileId(), TranscodeStatus.FAILED);
-        }
-    }
-}
-```
-
-### 三种消费者实现
-
-| 消费者 | RocketMQ Tag | 并发线程 | 处理逻辑 |
-|--------|-------------|---------|---------|
-| ImageTranscodeConsumer | `img` | 8 | Thumbnailator 生成 s/m/l 三种尺寸缩略图 |
-| VideoTranscodeConsumer | `video` | 2 | FFmpeg 抽取首帧封面 |
-| DocTranscodeConsumer | `doc` | 4 | Apache Tika 提取文本摘要 |
-
-Tag 分发由 `TranscodeProducer` 根据 MIME 类型决定：`image/*` → `img`，`video/*` → `video`，`application/pdf` 等 → `doc`。
-
----
-
-## 四、失败兜底 —— 三层防护
-
-### 第一层：RocketMQ 自动重试
-
-消费者抛出异常后，RocketMQ 会自动重投消息。默认重试 16 次，间隔从 10s 递增到 2h。但 `AbstractTranscodeConsumer` 主动设置了 `MAX_RETRY_BEFORE_GIVE_UP = 8`，超过 8 次就不再重试。
-
-### 第二层：死信队列（DLQ）
-
-超过 RocketMQ 最大重试次数的消息会进入死信队列 `%DLQ%CG-transcode-img`。`TranscodeDlqConsumer` 监听这个队列：
-
-```java
-@RocketMQMessageListener(topic = MqTopics.DLQ_TRANSCODE_IMG, ...)
-public class TranscodeDlqConsumer implements RocketMQListener<TranscodeMessage> {
-    @Override
-    public void onMessage(TranscodeMessage msg) {
-        // 输出告警日志（运维监控系统可以订阅这个日志关键词）
-        log.error("[TRANSCODE-DLQ-ALERT] fileId={}, mimeType={}, retryCount={}",
-                msg.getFileId(), msg.getMimeType(), msg.getRetryCount());
-        // 标记文件转码状态为 FAILED
-        fileMetaService.updateTranscodeStatus(msg.getFileId(), TranscodeStatus.FAILED);
-        // 记录一条 DLQ 类型的 TranscodeRecord
-        recordMapper.insert(dlqRecord);
-    }
-}
-```
-
-### 第三层：补偿扫描
-
-即使 RocketMQ 消息丢失（极端情况），`TranscodeCompensationTask` 每 5 分钟扫描一次数据库，找出"已校验通过但还没转码"的文件，重新发送转码消息：
-
-```java
-@Scheduled(fixedDelay = 300_000, initialDelay = 120_000)
-public void compensate() {
-    // 找出 status=AVAILABLE 且 transcode_status=NONE 且创建超过 10 分钟的记录
-    List<FileMeta> orphans = fileMetaMapper.selectList(...);
-    for (FileMeta m : orphans) {
-        if (transcodeProducer.publish(msg)) {
-            published++;
-        } else {
-            // MIME 类型不支持转码 → 标记 SKIP 避免反复扫描
-            fileMetaService.updateTranscodeStatus(m.getFileId(), TranscodeStatus.SKIP);
-        }
-    }
-}
-```
-
-**为什么给正常链路留 10 分钟余量**：如果一个文件刚刚合并通过校验，正常的转码流程可能还在进行中（或者消息正在 RocketMQ 队列中排队）。设置 10 分钟阈值避免误判"遗漏"。
-
-> **面试要点**：异步转码管道的三层防护是架构设计的亮点。面试官问"消息丢了怎么办"，回答：**RocketMQ 自动重试 → DLQ 兜底告警 → 定时补偿扫描**。三层防护确保"最终一致性"。追问"模板方法模式的好处"，回答：**新增转码类型只需继承 AbstractTranscodeConsumer 并实现 doTranscode()，零侵入主流程**。
+下载与预览的访问条件见 [04 下载与缓存](./04-download-flow.md)。

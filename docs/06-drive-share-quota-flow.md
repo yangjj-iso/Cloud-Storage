@@ -1,210 +1,168 @@
-# 链路六：网盘 / 分享 / 配额预留数据流详解
+# 网盘、分享与配额
 
-> 本篇覆盖对齐 Go 版后新增的核心链路：网盘目录树与回收站、批量/文件夹 ZIP 打包下载、
-> 文件分享（公开浏览 / 打包下载 / 递归转存）、以及把配额从「合并时扣减」改造为
-> 「准入即预留」的模型。所有数据流均标注了**数据在哪一层、经过哪些存储**。
+CloudChunk 将物理对象、用户引用和目录节点分开建模。这个边界使同一份内容可被多个用户引用，同时允许每个用户拥有独立的目录、回收站、分享和配额状态。
 
----
+## 核心模型
 
-## 一、文件如何进入网盘（user_file 的产生）
-
-`file_meta` 记录的是**物理对象**（一份 MD5 唯一的文件，可被多人引用）；`user_file` 记录的是
-**用户视角的目录树节点**（"我的网盘里第几个目录下有这个文件"）。两者通过 `file_id` 关联。
-
-上传合并成功、或秒传命中时，会为每个参与者在网盘根目录挂一个 `user_file` 条目（幂等）：
-
-```mermaid
-sequenceDiagram
-    participant C as 客户端
-    participant U as UploadService
-    participant MTX as MergeTransactionService(@Transactional)
-    participant UFS as UserFileService
-    participant DB as MySQL
-
-    C->>U: POST /upload/merge/{fileId}
-    U->>U: Redisson 锁(看门狗) + 校验分片齐全
-    U->>MTX: finalizeSuccess(session)
-    MTX->>DB: insert file_meta (status=MERGED, ref_count=N)
-    MTX->>DB: update upload_session=COMPLETED
-    Note over MTX: 配额已在 init 预留，此处不再累加
-    loop 每个 file_reference 参与者
-        MTX->>UFS: createFileEntryIfAbsent(userId, parentId=0, fileId,...)
-        UFS->>DB: 若同目录无同 fileId 活跃行则 insert user_file
-    end
-    U-->>C: {fileId, status=MERGED}
-```
-
-秒传路径（`UploadService.init` 命中 `findReusableByMd5`）同理：新增引用 → 原子预留配额 →
-`incRefCount` → `createFileEntryIfAbsent` 落盘。
-
-**幂等保证**：`createFileEntryIfAbsent` 先查 `(userId, fileId, status=0)`，同父目录已存在则跳过，
-避免合并重试或并发产生重复行（且 merge 全程处于 Redisson 锁内，天然串行）。
-
----
-
-## 二、批量 / 文件夹 ZIP 打包下载
-
-`POST /api/v1/drive/download-zip {ids:[...]}`：ids 可混合文件与目录，单个目录 id 即整目录打包。
+| 模型 | 含义 | 关键约束 |
+| --- | --- | --- |
+| `file_meta` | 物理文件对象 | 一份对象可被多用户引用；状态决定是否可用 |
+| `file_reference` | 用户对物理文件的引用或上传参与关系 | 用于引用计数、配额及文件访问 |
+| `user_file` | 用户网盘树节点 | 文件访问、预览、移动和回收站均以节点为入口 |
+| `user_quota` | 用户预留空间与文件数 | 用原子条件更新避免超额 |
+| `file_share` | 某个网盘节点的公开分享 | 包含过期时间、状态和提取码哈希 |
 
 ```mermaid
-sequenceDiagram
-    participant C as 客户端
-    participant DC as DriveController
-    participant DZS as DriveZipService
-    participant DB as MySQL
-    participant MO as MinIO
-    participant OUT as 响应流(chunked)
-
-    C->>DC: POST /drive/download-zip {ids}
-    DC->>DZS: prepareZip(userId, ids)  (写响应体前完成)
-    loop 遍历每个 id
-        DZS->>DB: findByIdActive(id,userId) 校验所有权
-        alt 目录
-            DZS->>DB: 递归收集子树文件节点(路径消毒, visited 防环)
-        else 文件
-            DZS->>DZS: 收集 (path, fileId)
-        end
-    end
-    DZS->>DB: findByFileIds(批量) 一次取元数据(消除 N+1)
-    DZS-->>DC: ZipPlan{name, entries}(过滤 Deleted/Broken, 去重)
-    DC->>OUT: 设置 application/zip + Content-Disposition(200)
-    loop 每个 entry (StreamingResponseBody 内)
-        DZS->>MO: get(bucket, objectKey) 懒开流
-        MO-->>OUT: zip.putNextEntry + io 拷贝(64KB, 恒定内存)
-    end
+flowchart LR
+  Meta[file_meta 物理对象] --> Ref[file_reference 用户引用]
+  Ref --> Node[user_file 目录树节点]
+  Node --> Share[file_share 可选分享]
+  Ref --> Quota[user_quota 配额]
 ```
 
-**关键设计**：
-- **清单先解析、再写体**：`prepareZip` 只读 DB，参数/权限错误此时抛出，仍走全局异常返回 JSON；
-  一旦开始写响应体（chunked）就无法改状态码，故 `streamZip` 内单个坏对象只跳过不中断。
-- **两趟批量**：先遍历收集 `(path, fileId)`，再 `findByFileIds` 一次查全部元数据，避免逐文件 N+1。
-- **安全 / 健壮**：`sanitize` 消毒每段路径（去 `/ \`、控制字符、纯点名 → 防 zip-slip）；
-  `dedupe` 重名加 ` (n)`；`visited` 目录集合防父子环无限递归；条目上限 2 万。
+## 网盘目录与文件节点
 
----
+`/api/v1/drive` 提供目录创建、列表、重命名、移动、删除与 ZIP 打包接口；`/api/v1/recycle` 管理软删除节点。
 
-## 三、回收站：软删 / 还原 / 彻底删除（递归 + CTE）
+| 操作 | 接口 | 结果 |
+| --- | --- | --- |
+| 新建目录 | `POST /drive/mkdir` | 在父节点下创建目录节点 |
+| 列表 | `GET /drive/list` | 返回指定父节点下的活跃节点 |
+| 重命名 | `POST /drive/rename` | 修改当前用户节点名称 |
+| 移动 | `POST /drive/move` | 校验目标目录归属后调整父节点 |
+| 移入回收站 | `DELETE /drive/{id}` | 将节点及其子树标记为回收站状态 |
+| ZIP 下载 | `POST /drive/download-zip` | 解析文件/目录节点后流式输出 ZIP |
+| 还原 | `POST /recycle/{id}/restore` | 还原节点及其子树 |
+| 彻底删除 | `DELETE /recycle/{id}` | 删除引用，最后一个引用时回收物理对象 |
 
-删除网盘节点不立即物理删，而是走「回收站」状态机；目录操作按**整棵子树**处理。
-子树遍历用 MySQL 8 递归 CTE 一次查完（替代逐层 BFS 的 N+1）。
+上传合并成功、秒传命中、共享会话完成和分享转存时，服务会为用户创建根目录文件节点。该操作是幂等的：同一用户、同一活跃文件不会因重试出现重复节点。
+
+## 回收站状态
+
+回收站是逻辑删除，不是配额规避机制。
 
 ```mermaid
 stateDiagram-v2
-    [*] --> 正常: 上传/转存落盘(status=0)
-    正常 --> 回收站: DELETE /drive/{id}\nmoveToRecycleBin\n(整棵子树 status=1, 每文件 subUsed 释放配额)
-    回收站 --> 正常: POST /recycle/{id}/restore\n(整棵子树 status=0, 每文件 addUsed 重占配额)
-    回收站 --> [*]: DELETE /recycle/{id}\nhardDelete\n(releaseFileReference: 引用-1, 计数=0 则物理删对象+markDeleted)
+  [*] --> Active: 创建目录或文件节点
+  Active --> Recycled: DELETE /drive/{id}
+  Recycled --> Active: POST /recycle/{id}/restore
+  Recycled --> [*]: DELETE /recycle/{id}
 ```
 
-- `moveToRecycleBin`/`restore` 加 `@Transactional`：状态 + 配额加减原子，中途失败整体回滚。
-- 递归遍历 `UserFileMapper.selectSubtree`（`WITH RECURSIVE`）：root 不受 status 过滤、后代按 status，
-  与原 BFS 语义一致；异常父子环触发 MySQL 递归深度上限报错而非无限递归。
-- `hardDelete` 通过 `releaseFileReference` 按引用计数 GC 物理对象（最后一个引用消失才真正删 MinIO 对象）。
+- 删除目录时按子树处理，底层使用 MySQL 8 递归 CTE 获取节点集合。
+- 移入回收站仍保留用户对物理文件的引用，因此**不释放配额**。
+- 还原只恢复节点状态，同样不重新占用配额。
+- 彻底删除才释放 `file_reference`；当最后一个引用消失时，服务删除对象并更新物理文件状态。
+- 常规下载与预览要求活跃 `user_file` 节点，因此回收站中的文件不能通过普通文件接口继续访问。
 
----
+## ZIP 打包
 
-## 四、分享：公开浏览 / 打包下载 / 递归转存
-
-分享把某个网盘节点（文件或目录）生成带**提取码**的链接。拥有者操作需登录；
-公开访问（`GET /api/v1/share/*`，`/list` 除外）由 `AuthFilter` 放行，但需提取码。
+`POST /api/v1/drive/download-zip` 接收文件或目录节点 ID。服务先完成权限校验和压缩清单准备，再开始写 HTTP 响应体。
 
 ```mermaid
 sequenceDiagram
-    participant A as 分享者
-    participant B as 接收者(公开)
-    participant SC as ShareController
-    participant SS as ShareService
-    participant UFS as UserFileService
-    participant DZS as DriveZipService
-    participant DB as MySQL
+  participant C as 客户端
+  participant D as DriveZipService
+  participant DB as MySQL
+  participant O as 对象存储
 
-    A->>SC: POST /share {userFileId, expireDays}
-    SC->>SS: createShare  (uuid16 shareId + SecureRandom 提取码)
-    SS->>DB: insert file_share(status=0)
-    SS-->>A: {shareId, shareCode, shareUrl}
-
-    B->>SC: GET /share/{id}/children?code=  (公开)
-    SC->>SS: listShareChildren
-    SS->>SS: validateShare(常量时间比对提取码 + 过期)
-    SS->>UFS: isWithinSubtree 越权防护 + findByParentActive
-    SS-->>B: 目录内容
-
-    B->>SC: GET /share/{id}/download-zip?code=
-    SC->>SS: prepareShareArchive → DZS.prepareZip(分享者 userId, [rootId])
-    SS-->>SC: ZipPlan  →  DZS.streamZip 流式下发
-
-    B->>SC: POST /share/save {shareId, shareCode, parentId}  (需登录)
-    SC->>SS: saveToMyDrive(@Transactional)
-    loop 递归子树
-        alt 目录
-            SS->>UFS: mkdir(接收者, destParent, name)
-        else 文件
-            SS->>DB: addReference + 原子 tryConsume 预留 + incRefCount
-            SS->>UFS: createFileEntryIfAbsent(接收者目录)
-        end
-    end
+  C->>D: 选择文件或目录节点
+  D->>DB: 校验所有权并展开子树
+  D->>DB: 批量查询 file_meta
+  D->>D: 消毒路径、去重、构建 ZIP 清单
+  D->>O: 按清单逐个打开对象流
+  O-->>C: 流式 ZIP 响应
 ```
 
-**安全 / 健壮**：
-- 提取码用 `MessageDigest.isEqual` **常量时间比较**，防时序侧信道；过期即拒绝。
-- 公开浏览用 `isWithinSubtree` 限制在分享子树内，防止用别的 id 越权列目录。
-- `saveToMyDrive` 加 `@Transactional`：递归转存中途配额不足时**整棵回滚**（引用/配额/目录行），
-  不会留下半保存的目录；且禁止转存自己的分享、校验目标目录归属。
-- 打包/直连下载复用 `DriveZipService`，天然继承 zip-slip 消毒、跳过坏文件等保护。
+当前实现的保护边界包括：
 
----
+- 在写响应前验证所有节点，避免已开始 ZIP 输出后才返回 JSON 权限错误。
+- 对 ZIP 内路径进行消毒，防止 `../` 等 zip-slip 路径。
+- 对同名条目重命名去重，目录遍历维护已访问集合。
+- 条目上限为 20,000，目录遍历节点上限为 100,000。
+- 单个对象在流式输出阶段读取失败时无法可靠改写响应状态；实现应记录异常并避免影响其余可读取条目。
 
-## 五、配额预留模型（reservation）——关闭合并 TOCTOU
+当前 Web 页面尚未提供完整的目录 ZIP 操作入口，后端 API 可直接通过 OpenAPI 调用。
 
-**旧模型（有竞态）**：init 只 `checkCapacity`（读后比较），合并时才 `addUsed`。两个并发上传可能
-都通过检查、都合并、都累加 → 超配额。
+## 分享
 
-**新模型（预留）**：准入（新上传 / 加入会话 / 秒传）即用**原子条件更新**预留空间；合并不再累加；
-取消 / 过期释放。
+分享由拥有者创建，公开浏览和下载不要求登录，但必须满足有效分享、提取码和子树边界。我的分享列表、创建与取消属于登录用户操作。
+
+| 操作 | 接口 | 是否需要登录 |
+| --- | --- | --- |
+| 创建分享 | `POST /share` | 是 |
+| 我的分享列表 | `GET /share/list` | 是 |
+| 取消分享 | `DELETE /share/{shareId}` | 是 |
+| 公开详情 | `GET /share/{shareId}` | 否，需要提取码 |
+| 公开子节点 | `GET /share/{shareId}/children` | 否，需要提取码 |
+| 公开下载 | `GET /share/{shareId}/download` | 否，需要提取码 |
+| 公开 ZIP | `GET /share/{shareId}/download-zip` | 否，需要提取码 |
+| 转存到我的网盘 | `POST /share/save` | 是 |
+
+### 创建与验证
+
+服务生成随机 `shareId` 和提取码。提取码只在创建结果中返回明文；数据库保存其哈希，校验时使用常量时间比较，同时兼容历史明文数据。
+
+公开访问还会确认：
+
+1. 分享未取消、未过期。
+2. 提取码有效。
+3. 请求的子节点仍在分享根目录子树内。
+4. 公开访问令牌桶允许当前分享和客户端组合。
+
+公开分享的默认频率限制是每秒 1 次、突发 5 次。它与已登录用户的上传/下载限流独立。
+
+### 转存
+
+接收者调用 `/share/save` 时，服务会校验分享有效、目标目录归属和非自分享，然后递归创建目录/文件节点。每个被转存的文件需要通过原子配额预留；事务失败时不应留下半截目录树或孤立引用。
+
+当前 Web 前端有“我的分享”列表和管理操作，但未提供完整的公开分享浏览、公开下载和转存页面流程。
+
+## 配额预留模型
+
+配额的关键原则是“准入即预留”，而不是“所有分片合并后再扣减”。
 
 ```mermaid
 sequenceDiagram
-    participant C as 客户端
-    participant U as UploadService
-    participant Q as QuotaService
-    participant DB as MySQL(user_quota)
+  participant C as 客户端
+  participant U as 业务服务
+  participant Q as QuotaService
+  participant DB as user_quota
 
-    C->>U: POST /upload/init
-    U->>Q: tryConsume(userId, fileSize)
-    Q->>DB: UPDATE user_quota SET used=used+?, file_count+1\n  WHERE user_id=? AND used+? <= total
-    alt 影响行数=0 (空间不足)
-        Q-->>U: throw QUOTA_EXCEEDED
-        U-->>C: 403 配额不足
-    else 影响行数=1 (预留成功)
-        U->>DB: 建会话 (失败则 subUsed 回滚预留)
-        U-->>C: {fileId, mode}
-    end
-
-    Note over U,DB: 合并 finalizeSuccess 不再 addUsed（已预留）
-    Note over U,DB: cancel / 过期清理 → subUsed 释放（置 EXPIRED 成功才释放, 不重复）
+  C->>U: 新上传/加入会话/秒传/转存
+  U->>Q: tryConsume(user, fileSize)
+  Q->>DB: UPDATE ... WHERE used + size <= total
+  alt 影响行数为 1
+    DB-->>Q: 预留成功
+    Q-->>U: 继续创建引用或节点
+  else 影响行数为 0
+    DB-->>Q: 配额不足
+    Q-->>U: 拒绝操作
+  end
 ```
 
-- 原子性来自单条 `UPDATE ... WHERE used_bytes + ? <= total_bytes`（`UserQuotaMapper.tryAddUsed`），
-  MySQL 行锁保证并发下"检查+扣减"不可分割，从根上消除 TOCTOU。
-- 释放对称：`cancel` 与 `StaleSessionCleanupTask` 用 `subUsed`；清理任务**先原子置 EXPIRED、成功才释放**，
-  避免多实例/多轮对同一会话重复释放导致少计。
-- 边界：可空 `fileSize` 做空值兜底，避免自动拆箱 NPE。
+| 时点 | 配额行为 |
+| --- | --- |
+| 新上传创建会话 | 预留空间和文件数 |
+| 加入共享运行中会话 | 为参与者预留 |
+| 秒传命中 | 为新增引用预留 |
+| 分享转存 | 为接收者预留 |
+| 合并成功 | 不重复累加 |
+| 取消或过期会话 | 释放对应预留 |
+| 移入/还原回收站 | 不改变预留 |
+| 彻底删除最后引用 | 释放对应引用与配额 |
 
----
+`UserQuotaMapper.tryAddUsed` 使用带条件的单条更新完成“检查加扣减”。这比先读剩余空间再更新更适合并发场景，因为 MySQL 会把条件检查与更新放在同一个原子操作中。
 
-## 六、分布式锁与限速（基础设施升级）
+## 前端覆盖
 
-- **Redisson 看门狗锁**：`RedisLock` 底层换 Redisson，`leaseTime=-1` 启用看门狗（默认 30s 租约、
-  ~10s 自动续期，直到 unlock）。大文件合并不会中途锁过期；进程崩溃租约到期自动释放，杜绝死锁。
-  API 签名不变，调用方零改动。
-- **下载令牌桶限速**：`RateLimitedInputStream`（1 秒突发桶、单读上限 256KB、不足即阻塞）包裹下载流；
-  `download_speed_limit` 由管理端**热更新**、启动时由 `SettingsInitializer` 加载生效。
+| 功能 | 后端 | 当前 Web |
+| --- | --- | --- |
+| 文件/目录列表、创建、重命名、移动 | 已实现 | 已接入 |
+| 回收站列表、恢复、彻底删除 | 已实现 | 已接入 |
+| 配额查询 | 已实现 | 已接入 |
+| 创建/列表/取消分享 | 已实现 | 已接入 |
+| 公开分享浏览、下载、转存 | 已实现 | 未提供完整页面流程 |
+| 目录 ZIP 下载 | 已实现 | 未接入 |
 
----
-
-## 七、可观测
-
-- `/actuator/prometheus`（micrometer-registry-prometheus）暴露 JVM / HTTP / Hikari / Caffeine 指标，
-  含 HTTP 时延直方图（Grafana P99）。
-- OpenTelemetry 桥接 + OTLP 导出：W3C `traceparent` 传播；默认采样 0（无 collector 不产生导出噪声），
-  `TRACING_SAMPLING=1.0` + `OTLP_TRACES_ENDPOINT` 即可开启。日志已带 `%X{traceId}` 便于关联。
+上传与共享会话如何建立用户节点见 [01 分片上传](./01-upload-flow.md) 和 [02 秒传、共享会话与断点续传](./02-instant-resume-flow.md)。

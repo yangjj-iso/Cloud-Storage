@@ -1,157 +1,108 @@
-# 链路四：下载与缓存体系详解
+# 下载、预览与缓存
 
-> 下载看似简单，但在高并发和大文件场景下，缓存策略、Range 支持、带宽优化都有很多讲究。
+文件下载链路以“可用物理文件 + 当前用户的活跃网盘节点”为访问边界。知道 `fileId` 本身不足以获取文件：常规用户请求还必须能够证明自己拥有未删除的 `user_file` 条目。
 
-## 一、两种下载方式
+## 接口
 
-CloudChunk 提供两种下载路径，适用于不同场景：
+| 接口 | 用途 | 访问边界 |
+| --- | --- | --- |
+| `GET /api/v1/file/{fileId}` | 文件元数据 | 当前用户对文件存在活跃引用 |
+| `GET /api/v1/file/{fileId}/url` | 获取预签名下载 URL | `AVAILABLE` 文件且有活跃目录节点 |
+| `GET /api/v1/file/{fileId}/download` | 后端 Range 流式下载 | 同上 |
+| `GET /api/v1/file/{fileId}/thumbnail` | 获取缩略图 | 文件引用与缩略图产物权限校验 |
+| `GET /api/v1/preview/{userFileId}` | 查询预览信息 | 使用 `user_file` 所有权校验 |
+| `GET /api/v1/share/{shareId}/download` | 公开分享单文件下载 | 有效分享、提取码与分享子树约束 |
 
-### 方式一：预签名 URL 重定向（推荐）
+管理员下载走独立的 `/api/v1/admin/files/{fileId}/download` 路径，并由管理员过滤器鉴权。
 
-后端不中转文件数据，只生成一个带签名的 MinIO URL 返回给前端。前端直接从 MinIO 下载。
+## 两种下载路径
 
-**优点**：后端零带宽压力，MinIO 承担全部文件传输。
-**适用场景**：普通文件下载、图片加载。
-
-### 方式二：Range 分段下载（流式代理）
-
-后端从 MinIO 读取指定范围的数据，流式转发给前端。支持 HTTP Range 请求。
-
-**优点**：兼容不支持重定向的客户端，支持视频拖动播放。
-**适用场景**：视频播放（拖动进度条时浏览器发 Range 请求）、需要鉴权拦截的场景。
-
-### 预签名 URL 生成
-
-```java
-public PresignedUrl presign(String fileId, Duration ttl) {
-    // 先验证文件是否可用（不是 BROKEN 或 DELETED）
-    FileMeta meta = fileMetaService.getAvailableOrThrow(fileId);
-
-    // ★ 先查 Redis 缓存：避免每次请求都调 MinIO 生成签名 URL
-    String cached = fileMetaService.getCachedUrl(fileId);
-    if (cached != null && !cached.isBlank()) {
-        Duration remaining = fileMetaService.getCachedUrlTtl(fileId);
-        return new PresignedUrl(cached, remaining);
-    }
-
-    // 缓存未中 → 调 MinIO 生成新的预签名 URL
-    String url = storage.presignDownload(meta.getBucket(), meta.getObjectKey(), ttl);
-
-    // ★ 缓存策略：缓存 TTL 比签名有效期短 1 分钟
-    // 为什么？假设签名有效期 30 分钟，缓存也 30 分钟。
-    // 那么用户在第 29 分钟拿到 URL，1 分钟后签名过期，下载失败。
-    // 缩短 1 分钟后，最晚第 29 分钟 Redis 缓存过期，下一次请求会生成新 URL。
-    Duration cacheTtl = ttl.compareTo(Duration.ofMinutes(5)) > 0
-            ? ttl.minusMinutes(1) : ttl;
-    fileMetaService.cacheUrl(fileId, url, cacheTtl);
-    return new PresignedUrl(url, cacheTtl);
-}
+```mermaid
+flowchart LR
+  Request[下载请求] --> Auth{AVAILABLE + 活跃 user_file?}
+  Auth -->|否| Deny[拒绝]
+  Auth -->|是| Choice{调用接口}
+  Choice --> Url[预签名 URL]
+  Choice --> Range[Range 流式代理]
+  Url --> MinIO[(浏览器直接向 MinIO 下载)]
+  Range --> Storage[(后端从存储读取范围)]
+  Storage --> Client[写入 HTTP 响应]
 ```
 
-### Range 分段下载
+### 预签名 URL
 
-```java
-public DownloadStream open(String fileId, String rangeHeader) {
-    FileMeta meta = fileMetaService.getAvailableOrThrow(fileId);
-    long total = meta.getFileSize();
+`GET /file/{fileId}/url` 返回 MinIO 下载地址。后端不转发文件字节，适合普通浏览器下载和直接媒体加载。默认有效期为 `cloudchunk.storage.presign-ttl` 的 30 分钟。
 
-    // 解析 Range 头：bytes=0-999 或 bytes=1000-
-    RangeSpec spec = RangeSpec.parse(rangeHeader, total);
-    if (!spec.valid()) {
-        throw BizException.of(ErrorCode.RANGE_NOT_SATISFIABLE, rangeHeader);
-    }
+为减少重复调用 MinIO 生成 URL，服务会缓存预签名结果。缓存剩余时间必须足以覆盖新请求的时长；缓存 TTL 也会比签名的有效期更短，避免返回即将过期的地址。
 
-    if (spec.isFull()) {
-        // 无 Range 头 → 200 OK + 完整文件流
-        InputStream in = storage.get(new GetRequest(meta.getBucket(), meta.getObjectKey()));
-        return new DownloadStream(meta, in, 0, total - 1, total, true);
-    }
+预签名 URL 本身是临时凭据。调用方不得在日志、异常响应、持久化记录或公开页面中长期保存它。
 
-    // 有 Range 头 → 206 Partial Content + 指定范围的流
-    RangeStream rs = storage.getRange(GetRangeRequest.of(
-            meta.getBucket(), meta.getObjectKey(), spec.start(), spec.end(), total));
-    return new DownloadStream(meta, rs.stream(), rs.start(), rs.end(), rs.total(), false);
-}
+### Range 流式代理
+
+`GET /file/{fileId}/download` 解析 `Range` 请求头并从存储策略请求完整流或指定字节范围：
+
+- 无 `Range`：返回完整文件，状态为 `200`。
+- 合法 `Range`：返回区间流，状态为 `206`，带 `Content-Range`。
+- 非法范围：返回范围错误，不尝试读取对象。
+
+该路径用于需要后端控制响应头、支持浏览器媒体拖动，或需要在数据流上施加下载字节速率限制的场景。它不是“更快”的下载方式；数据仍经应用进程转发。
+
+## 下载限速与请求限流
+
+两类限制独立存在：
+
+| 机制 | 位置 | 默认值 | 限制对象 |
+| --- | --- | --- | --- |
+| HTTP 请求令牌桶 | `RateLimitFilter` | 下载 50 rps、burst 100 | 单用户请求频率 |
+| 字节速率限制 | `DownloadService` / `RateLimitedInputStream` | 可由 `download_speed_limit` 管理设置修改 | 代理下载流的字节传输速率 |
+
+请求令牌桶不等于带宽限速。前者防止单个用户高频创建下载请求，后者在代理路径读取流时限制传输速度。管理端修改 `download_speed_limit` 后会热更新当前服务实例的下载服务配置。
+
+## 缓存
+
+文件元数据使用本地 Caffeine 与 Redis 两级缓存；默认最大条目数为 20,000、TTL 为 5 分钟。缓存的目的是降低反复读取 `file_meta` 的成本，不替代数据库的权限判断。
+
+当文件元数据、状态或处理结果改变时，服务通过 Redis Pub/Sub 主题 `cc:cache:invalidate:file_meta` 失效相关缓存。多实例订阅者接收消息后清理本地 Caffeine 项，随后请求将回源数据库和存储。
+
+```mermaid
+sequenceDiagram
+  participant C as 客户端
+  participant D as DownloadService
+  participant L as Caffeine
+  participant R as Redis
+  participant DB as MySQL
+  participant O as MinIO
+
+  C->>D: 请求 URL 或下载
+  D->>D: 校验活跃 user_file 与 AVAILABLE
+  D->>L: 查询文件元数据
+  alt 本地未命中
+    D->>R: 查询 Redis
+    alt Redis 未命中
+      D->>DB: 查询 file_meta
+      DB-->>D: 元数据
+      D->>R: 写缓存
+    end
+    D->>L: 写本地缓存
+  end
+  D->>O: 生成签名或读取对象范围
 ```
 
-Controller 层根据 `DownloadStream.full` 决定返回 200 还是 206，并设置 `Content-Range` 响应头。这让浏览器的视频播放器能正确处理进度拖动。
+## 前端覆盖
 
----
+当前 Web 前端覆盖文件列表、文件详情、缩略图/预览入口和普通下载。`cloudchunk-web/src/lib/download.ts` 负责浏览器侧下载处理；前端不会直接绕过 API 获取物理对象键。
 
-## 二、两级缓存体系
+目录 ZIP 下载和公开分享下载的后端接口已经实现，但当前页面没有完整的公开分享与目录打包用户流程。相关边界见 [06 网盘、分享与配额](./06-drive-share-quota-flow.md)。
 
-CloudChunk 的文件元数据使用 **Caffeine（JVM 本地缓存）+ Redis（分布式缓存）** 两级架构：
+## 失败边界
 
-```
-读取链路：
-Caffeine → miss → Redis → miss → MySQL → 回填两级缓存
+| 场景 | 当前处理 |
+| --- | --- |
+| 文件不是 `AVAILABLE` | 常规下载和预览拒绝 |
+| 用户节点在回收站或已删除 | 不能通过常规文件接口下载 |
+| 预签名 URL 过期 | 客户端重新请求 `/url` 获取新地址 |
+| Range 不合法 | 返回范围错误，不读取对象 |
+| 缓存过期或失效消息丢失 | TTL 到期或下一次更新后回源；缓存不应作为权限唯一来源 |
+| 存储读取失败 | 由全局异常处理映射为业务错误；已开始流式响应时无法再可靠返回 JSON 错误 |
 
-写入/更新链路：
-更新 MySQL → 失效 Caffeine → 失效 Redis → Pub/Sub 通知其他实例失效 Caffeine
-```
-
-### 为什么需要两级？
-
-| 只用 Redis | 只用 Caffeine | 两级缓存 |
-|-----------|-------------|---------|
-| 每次查询需要网络往返（~1ms） | 多实例之间缓存不共享 | Caffeine 命中：0 网络开销 |
-| 高并发时 Redis 成为瓶颈 | 更新不一致 | Redis 兜底：实例间共享 |
-| | | MySQL 兜底：持久化 |
-
-Caffeine 的优势是**零网络开销**——数据就在 JVM 堆里，读取只需几十纳秒。但问题是多实例部署时，实例 A 更新了文件元数据，实例 B 的 Caffeine 缓存还是旧数据。
-
-### 跨实例缓存一致性 —— Redis Pub/Sub
-
-解决方案是当任意实例写入/更新 file_meta 时，通过 Redis Pub/Sub 通知所有实例清除对应的 Caffeine 缓存：
-
-```java
-// FileMetaService.invalidateCache() — 写穿失效
-private void invalidateCache(String fileId) {
-    // 1. 清除本实例的 Caffeine
-    if (localCache != null) localCache.invalidate(fileId);
-    try {
-        // 2. 清除 Redis 缓存
-        redis.delete(RedisKeys.fileMeta(fileId));
-        redis.delete(RedisKeys.fileUrl(fileId));
-        // 3. ★ Pub/Sub 广播：通知所有其他实例
-        redisTemplate.convertAndSend(RedisKeys.CHANNEL_CACHE_INVALIDATE, fileId);
-    } catch (Exception e) {
-        log.debug("invalidate cache failed: {}", fileId, e);
-    }
-}
-```
-
-其他实例通过 `CacheInvalidateListener` 接收消息并清除自己的 Caffeine：
-
-```java
-// CacheInvalidateListener — Redis Pub/Sub 消息监听
-public class CacheInvalidateListener implements MessageListener {
-    private final Cache<String, ?> localCache;
-
-    @Override
-    public void onMessage(Message message, byte[] pattern) {
-        String fileId = new String(message.getBody(), StandardCharsets.UTF_8);
-        localCache.invalidate(fileId);  // 清除本实例的 Caffeine
-    }
-}
-```
-
-### 为什么不用 Redis Pub/Sub 同步数据而是只同步"失效"？
-
-1. **数据量**：file_meta 对象可能有 KB 级别的 JSON extra 字段，每次更新都广播整个对象浪费带宽
-2. **一致性模型**：只广播"这个 key 失效了"，下次读取时各实例从 DB 拉最新数据。这是 **Cache-Aside** 模式的标准实践
-3. **简单可靠**：失效操作是幂等的（多次失效同一个 key 没有副作用），不需要处理消息重复
-
-### Caffeine 配置
-
-```yaml
-cloudchunk:
-  cache:
-    file-meta-enabled: true
-    file-meta-max-size: 20000    # 最多缓存 20000 个 FileMeta 对象
-    file-meta-ttl: PT5M          # 5 分钟后自动过期（即使没有收到失效通知）
-```
-
-TTL 是最后一道防线：即使 Pub/Sub 消息丢失（网络分区等极端情况），5 分钟后缓存也会自然过期。在这 5 分钟内可能返回旧数据，但不会永久不一致。
-
-> **面试要点**：两级缓存 + Pub/Sub 是分布式系统面试高频题。核心回答：**Caffeine 解决热点读延迟，Redis Pub/Sub 解决多实例一致性，TTL 兜底极端情况**。追问"CAP 里你选了什么"，回答：**选择了 AP（可用性 + 分区容忍），允许短暂的缓存不一致（最终一致性）**。
+文件从合并到 `AVAILABLE` 的状态变化见 [03 校验与媒体处理](./03-checksum-transcode-flow.md)。
