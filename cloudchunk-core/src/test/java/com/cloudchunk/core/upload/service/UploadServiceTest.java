@@ -22,7 +22,6 @@ import com.cloudchunk.core.upload.entity.UploadSession;
 import com.cloudchunk.core.upload.mapper.ChunkRecordMapper;
 import com.cloudchunk.core.upload.mapper.UploadSessionMapper;
 import com.cloudchunk.infra.redis.RedisLock;
-import com.cloudchunk.infra.redis.RedisService;
 import com.cloudchunk.storage.StorageStrategy;
 import com.cloudchunk.storage.StorageStrategyFactory;
 import com.cloudchunk.storage.model.ComposeRequest;
@@ -78,7 +77,6 @@ class UploadServiceTest {
     @Mock private QuotaService quotaService;
     @Mock private StorageStrategyFactory storageFactory;
     @Mock private ProgressStore progress;
-    @Mock private RedisService redis;
     @Mock private RedisLock redisLock;
     @Mock private CloudchunkProperties properties;
     @Mock private MergeTransactionService mergeTx;
@@ -110,7 +108,6 @@ class UploadServiceTest {
                 quotaService,
                 storageFactory,
                 progress,
-                redis,
                 redisLock,
                 properties,
                 mergeTx,

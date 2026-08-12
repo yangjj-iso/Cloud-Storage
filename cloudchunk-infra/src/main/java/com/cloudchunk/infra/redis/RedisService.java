@@ -1,7 +1,6 @@
 package com.cloudchunk.infra.redis;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.Collection;
@@ -10,8 +9,10 @@ import java.util.Set;
 
 /**
  * StringRedisTemplate 的薄封装，统一 TTL 语义并屏蔽常用操作。
+ * <p>
+ * 实例由 {@code RedisWorkloadConfiguration} 按负载装配，不再自行注册为组件：
+ * 不同负载可能指向不同的 Redis 实例。
  */
-@Component
 public class RedisService {
 
     private final StringRedisTemplate redis;

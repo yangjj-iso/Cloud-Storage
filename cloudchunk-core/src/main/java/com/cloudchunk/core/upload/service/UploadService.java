@@ -28,7 +28,6 @@ import com.cloudchunk.core.upload.entity.UploadSession;
 import com.cloudchunk.core.upload.mapper.ChunkRecordMapper;
 import com.cloudchunk.core.upload.mapper.UploadSessionMapper;
 import com.cloudchunk.infra.redis.RedisLock;
-import com.cloudchunk.infra.redis.RedisService;
 import com.cloudchunk.storage.StorageStrategy;
 import com.cloudchunk.storage.StorageStrategyFactory;
 import com.cloudchunk.storage.model.ComposeRequest;
@@ -74,7 +73,6 @@ public class UploadService {
     private final QuotaService quotaService;
     private final StorageStrategyFactory storageFactory;
     private final ProgressStore progress;
-    private final RedisService redis;
     private final RedisLock redisLock;
     private final CloudchunkProperties properties;
     private final MergeTransactionService mergeTx;
@@ -89,7 +87,6 @@ public class UploadService {
                          QuotaService quotaService,
                          StorageStrategyFactory storageFactory,
                          ProgressStore progress,
-                         RedisService redis,
                          RedisLock redisLock,
                          CloudchunkProperties properties,
                          MergeTransactionService mergeTx,
@@ -103,7 +100,6 @@ public class UploadService {
         this.quotaService = quotaService;
         this.storageFactory = storageFactory;
         this.progress = progress;
-        this.redis = redis;
         this.redisLock = redisLock;
         this.properties = properties;
         this.mergeTx = mergeTx;

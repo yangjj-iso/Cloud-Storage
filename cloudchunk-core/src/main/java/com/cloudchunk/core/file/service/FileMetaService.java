@@ -12,11 +12,13 @@ import com.cloudchunk.core.CloudchunkProperties;
 import com.cloudchunk.core.file.entity.FileMeta;
 import com.cloudchunk.core.file.mapper.FileMetaMapper;
 import com.cloudchunk.core.file.mapper.FileReferenceMapper;
+import com.cloudchunk.infra.config.RedisWorkloadConfiguration;
 import com.cloudchunk.infra.redis.RedisService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,7 +43,8 @@ public class FileMetaService {
     private final StringRedisTemplate redisTemplate;
     private final Cache<String, FileMeta> localCache;
 
-    public FileMetaService(FileMetaMapper mapper, FileReferenceMapper referenceMapper, RedisService redis,
+    public FileMetaService(FileMetaMapper mapper, FileReferenceMapper referenceMapper,
+                           @Qualifier(RedisWorkloadConfiguration.CACHE) RedisService redis,
                            StringRedisTemplate redisTemplate, CloudchunkProperties props) {
         this.mapper = mapper;
         this.referenceMapper = referenceMapper;

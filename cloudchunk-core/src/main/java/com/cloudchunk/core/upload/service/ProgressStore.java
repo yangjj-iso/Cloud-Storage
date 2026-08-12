@@ -1,7 +1,9 @@
 package com.cloudchunk.core.upload.service;
 
 import com.cloudchunk.common.constant.RedisKeys;
+import com.cloudchunk.infra.config.RedisWorkloadConfiguration;
 import com.cloudchunk.infra.redis.RedisService;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
@@ -73,7 +75,7 @@ public class ProgressStore {
 
     private final RedisService redis;
 
-    public ProgressStore(RedisService redis) {
+    public ProgressStore(@Qualifier(RedisWorkloadConfiguration.PROGRESS) RedisService redis) {
         this.redis = redis;
     }
 

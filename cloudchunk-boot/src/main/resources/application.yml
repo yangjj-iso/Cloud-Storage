@@ -137,6 +137,21 @@ cloudchunk:
     poll-interval-ms: 1000
   gc:
     poll-interval-ms: 5000
+  # Optionally peel the regenerable Redis workloads off the primary instance. The primary
+  # (spring.data.redis) always holds session data, which cannot be rebuilt: losing it logs
+  # everyone out. Progress, rate limiting and caching can all be recreated or simply retried,
+  # so isolating them means an eviction storm in the cache cannot take logins down with it.
+  # Leave a workload unset and it stays on the primary, exactly as before.
+  redis:
+    progress:
+      host: ${REDIS_PROGRESS_HOST:}
+      port: ${REDIS_PROGRESS_PORT:6379}
+    rate-limit:
+      host: ${REDIS_RATE_LIMIT_HOST:}
+      port: ${REDIS_RATE_LIMIT_PORT:6379}
+    cache:
+      host: ${REDIS_CACHE_HOST:}
+      port: ${REDIS_CACHE_PORT:6379}
   retention:
     enabled: ${RETENTION_ENABLED:true}
     # Must stay above the broker's message retention (RocketMQ keeps 72h by default):

@@ -1,5 +1,7 @@
 package com.cloudchunk.infra.redis;
 
+import com.cloudchunk.infra.config.RedisWorkloadConfiguration;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
@@ -46,7 +48,7 @@ public class RateLimiter {
 
     private final RedisService redisService;
 
-    public RateLimiter(RedisService redisService) {
+    public RateLimiter(@Qualifier(RedisWorkloadConfiguration.RATE_LIMIT) RedisService redisService) {
         this.redisService = redisService;
     }
 
