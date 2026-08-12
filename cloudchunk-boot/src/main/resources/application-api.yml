@@ -1,0 +1,8 @@
+spring:
+  autoconfigure:
+    exclude:
+      - org.apache.rocketmq.spring.autoconfigure.RocketMQAutoConfiguration
+
+cloudchunk:
+  runtime:
+    worker-enabled: false

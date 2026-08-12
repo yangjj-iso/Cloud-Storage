@@ -42,6 +42,12 @@ spring:
       maximum-pool-size: 50
       minimum-idle: 8
       connection-timeout: 3000
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
+    validate-migration-naming: true
   data:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
@@ -69,6 +75,12 @@ rocketmq:
     retry-times-when-send-failed: 2
 
 cloudchunk:
+  runtime:
+    # API instances set this to false; worker instances keep it true.
+    worker-enabled: ${WORKER_ENABLED:true}
+  observability:
+    # 仅在受信任网络中设为 true，供 Prometheus 无状态抓取指标。
+    prometheus-public: ${PROMETHEUS_PUBLIC:false}
   auth:
     token-ttl: P7D
   websocket:
@@ -86,6 +98,13 @@ cloudchunk:
   upload:
     md5-verify-thread-pool: 16
     auto-merge: true
+    # Hash knowledge is not proof of ownership. Enable only after implementing a possession challenge.
+    cross-user-dedup-enabled: ${CROSS_USER_DEDUP_ENABLED:false}
+    # Direct-uploaded bytes never pass through the backend; confirm must prove the object matches
+    # the declared chunk md5, otherwise chunk_record.chunk_md5 cannot be trusted for dedup.
+    verify-direct-chunk: ${VERIFY_DIRECT_CHUNK:true}
+    # Only used when the ETag is not a content md5 (multipart upload / server-side encryption).
+    verify-direct-chunk-by-read: ${VERIFY_DIRECT_CHUNK_BY_READ:true}
   storage:
     type: ${STORAGE_TYPE:minio}
     default-bucket: ${STORAGE_BUCKET:cloudchunk}
@@ -114,6 +133,10 @@ cloudchunk:
     upload-chunk-burst: 60
     download-rps: 50
     download-burst: 100
+  outbox:
+    poll-interval-ms: 1000
+  gc:
+    poll-interval-ms: 5000
   transcode:
     ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
     video-task-timeout: PT30M
@@ -134,6 +157,8 @@ management:
     health:
       show-details: when_authorized
   metrics:
+    tags:
+      application: ${spring.application.name}
     distribution:
       percentiles-histogram:
         http.server.requests: true    # HTTP 时延直方图，便于 Grafana P99
@@ -183,4 +208,4 @@ logging:
     org.apache.rocketmq: WARN
     io.minio: WARN
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%X{traceId:--}] [%thread] %-5level %logger{36} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [trace=%X{traceId:--} span=%X{spanId:--}] [%thread] %-5level %logger{36} - %msg%n"

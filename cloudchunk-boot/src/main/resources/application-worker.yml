@@ -1,0 +1,7 @@
+spring:
+  main:
+    web-application-type: none
+
+cloudchunk:
+  runtime:
+    worker-enabled: true
