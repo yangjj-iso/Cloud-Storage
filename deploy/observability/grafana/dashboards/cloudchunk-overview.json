@@ -1,0 +1,70 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{application=\"cloudchunk\"}[5m]))", "legendFormat": "请求/秒", "refId": "A" }],
+      "title": "HTTP 请求速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"cloudchunk\"}[5m])) by (le))", "legendFormat": "P95", "refId": "A" }],
+      "title": "HTTP P95 时延",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{application=\"cloudchunk\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{application=\"cloudchunk\"}[5m])), 0.001)", "legendFormat": "5xx", "refId": "A" }],
+      "title": "HTTP 5xx 比例",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "id": 4,
+      "targets": [{ "expr": "sum(increase(cloudchunk_outbox_published_total[5m]))", "legendFormat": "已发布", "refId": "A" }],
+      "title": "Outbox 发布量（5 分钟）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "id": 5,
+      "targets": [{ "expr": "sum(increase(cloudchunk_outbox_publish_failures_total[5m]))", "legendFormat": "失败", "refId": "A" }],
+      "title": "Outbox 发布失败（5 分钟）",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "id": 6,
+      "targets": [{ "expr": "sum(rate(cache_gets_total{cache=\"fileMeta\",result=\"hit\"}[5m])) / clamp_min(sum(rate(cache_gets_total{cache=\"fileMeta\"}[5m])), 0.001)", "legendFormat": "L1 命中率", "refId": "A" }],
+      "title": "文件元数据缓存命中率",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["cloudchunk", "observability"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "title": "CloudChunk 运行总览",
+  "uid": "cloudchunk-overview",
+  "version": 1
+}

@@ -1,4 +1,3 @@
-version: "3.9"
 name: cloudchunk
 
 networks:
@@ -10,6 +9,8 @@ volumes:
   redis-data:
   minio-data:
   rmq-store:
+  prometheus-data:
+  grafana-data:
 
 services:
   mysql:
@@ -26,7 +27,6 @@ services:
       - "--collation-server=utf8mb4_unicode_ci"
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./sql:/docker-entrypoint-initdb.d
     ports:
       - "3308:3306"
     networks: [cloudchunk-net]
@@ -93,6 +93,8 @@ services:
       - rmq-namesrv
     environment:
       JAVA_OPTS: "-Drocketmq.namesrv.addr=cc-rmq-namesrv:9876 -Dserver.port=8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8180:8080"
     networks: [cloudchunk-net]
@@ -118,3 +120,140 @@ services:
       retries: 10
 
   # minio-init removed: MinioStorageStrategy auto-creates the bucket on startup.
+
+  api:
+    profiles: ["app"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    image: cloudchunk-backend:local
+    container_name: cc-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rmq-broker:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: api
+      WORKER_ENABLED: "false"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RMQ_NAMESRV: cc-rmq-namesrv:9876
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_AK: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SK: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-http://localhost:8088}
+      TRACING_SAMPLING: ${TRACING_SAMPLING:-0.0}
+      OTLP_TRACES_ENDPOINT: ${OTLP_TRACES_ENDPOINT:-http://jaeger:4318/v1/traces}
+      PROMETHEUS_PUBLIC: ${PROMETHEUS_PUBLIC:-false}
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [cloudchunk-net]
+
+  worker:
+    profiles: ["app"]
+    image: cloudchunk-backend:local
+    container_name: cc-worker
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rmq-broker:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: worker
+      WORKER_ENABLED: "true"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RMQ_NAMESRV: cc-rmq-namesrv:9876
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_AK: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SK: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      TRACING_SAMPLING: ${TRACING_SAMPLING:-0.0}
+      OTLP_TRACES_ENDPOINT: ${OTLP_TRACES_ENDPOINT:-http://jaeger:4318/v1/traces}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [cloudchunk-net]
+
+  web:
+    profiles: ["app"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    image: cloudchunk-web:local
+    container_name: cc-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "8088:80"
+    networks: [cloudchunk-net]
+
+  jaeger:
+    profiles: ["observability"]
+    image: jaegertracing/all-in-one:1.65.0
+    container_name: cc-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "16686:16686"
+    networks: [cloudchunk-net]
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v2.55.1
+    container_name: cc-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9090:9090"
+    networks: [cloudchunk-net]
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:11.3.0
+    container_name: cc-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - jaeger
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    networks: [cloudchunk-net]

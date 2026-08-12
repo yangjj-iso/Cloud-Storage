@@ -1,0 +1,12 @@
+.git
+.idea
+.cursor
+**/target
+**/node_modules
+**/dist
+deploy/mysql/data
+deploy/redis/data
+deploy/minio/data
+deploy/rocketmq/logs
+deploy/rocketmq/store
+local-storage
