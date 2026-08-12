@@ -137,6 +137,17 @@ cloudchunk:
     poll-interval-ms: 1000
   gc:
     poll-interval-ms: 5000
+  retention:
+    enabled: ${RETENTION_ENABLED:true}
+    # Must stay above the broker's message retention (RocketMQ keeps 72h by default):
+    # these rows are the consumer idempotency keys, and dropping one while redelivery is
+    # still possible means the duplicate runs its side effects again.
+    inbox: ${RETENTION_INBOX:P7D}
+    outbox: ${RETENTION_OUTBOX:P7D}
+    object-gc: ${RETENTION_OBJECT_GC:P7D}
+    operation-log: ${RETENTION_OPERATION_LOG:P90D}
+    batch-size: 500
+    max-batches-per-run: 20
   transcode:
     ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
     video-task-timeout: PT30M

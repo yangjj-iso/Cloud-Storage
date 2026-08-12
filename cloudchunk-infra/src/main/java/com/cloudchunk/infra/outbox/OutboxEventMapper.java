@@ -1,6 +1,7 @@
 package com.cloudchunk.infra.outbox;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -56,4 +57,11 @@ public interface OutboxEventMapper extends BaseMapper<OutboxEvent> {
                   @Param("worker") String worker,
                   @Param("nextAttemptAt") LocalDateTime nextAttemptAt,
                   @Param("error") String error);
+
+    /**
+     * 删除已投递成功的历史事件。发布之后这些行只剩审计价值，但写入速率等同于业务写入速率，
+     * 不清理就会无限增长。按批删除以避免长事务和大范围行锁。
+     */
+    @Delete("DELETE FROM event_outbox WHERE status = 2 AND published_at < #{before} LIMIT #{limit}")
+    int deletePublishedBefore(@Param("before") LocalDateTime before, @Param("limit") int limit);
 }

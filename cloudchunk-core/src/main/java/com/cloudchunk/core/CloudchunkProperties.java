@@ -16,6 +16,7 @@ public class CloudchunkProperties {
     private Auth auth = new Auth();
     private Smtp smtp = new Smtp();
     private WebSocket webSocket = new WebSocket();
+    private Retention retention = new Retention();
 
     public static class Chunk {
         private int defaultSize = 5 * 1024 * 1024;
@@ -121,6 +122,43 @@ public class CloudchunkProperties {
         public void setFileMetaTtl(Duration fileMetaTtl) { this.fileMetaTtl = fileMetaTtl; }
     }
 
+    /**
+     * 运维表的保留窗口。Outbox、Inbox、对象回收任务和审计日志的写入速率与业务写入速率同量级，
+     * 但过了各自的窗口之后就不再有价值，不清理只会让最热的几张表无限增长。
+     */
+    public static class Retention {
+        private boolean enabled = true;
+        /**
+         * Inbox 是消费幂等键，保留窗口必须大于消息中间件的消息保留时长（RocketMQ 默认 72 小时）。
+         * 在 Broker 仍可能重投的窗口内删掉它，重复投递会被当成新消息重新执行一遍副作用。
+         */
+        private Duration inbox = Duration.ofDays(7);
+        /** 已投递的 Outbox 行只剩审计价值。 */
+        private Duration outbox = Duration.ofDays(7);
+        private Duration objectGc = Duration.ofDays(7);
+        /** 审计日志按合规要求保留，默认远长于其他运维表。 */
+        private Duration operationLog = Duration.ofDays(90);
+        /** 单条 DELETE 的行数上限，避免长事务与大范围行锁。 */
+        private int batchSize = 500;
+        /** 单轮最多执行多少批，给积压设一个可预期的清理速率上限。 */
+        private int maxBatchesPerRun = 20;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public Duration getInbox() { return inbox; }
+        public void setInbox(Duration inbox) { this.inbox = inbox; }
+        public Duration getOutbox() { return outbox; }
+        public void setOutbox(Duration outbox) { this.outbox = outbox; }
+        public Duration getObjectGc() { return objectGc; }
+        public void setObjectGc(Duration objectGc) { this.objectGc = objectGc; }
+        public Duration getOperationLog() { return operationLog; }
+        public void setOperationLog(Duration operationLog) { this.operationLog = operationLog; }
+        public int getBatchSize() { return batchSize; }
+        public void setBatchSize(int batchSize) { this.batchSize = batchSize; }
+        public int getMaxBatchesPerRun() { return maxBatchesPerRun; }
+        public void setMaxBatchesPerRun(int maxBatchesPerRun) { this.maxBatchesPerRun = maxBatchesPerRun; }
+    }
+
     /** 登录与会话配置 */
     public static class Auth {
         private Duration tokenTtl = Duration.ofDays(7);
@@ -179,4 +217,6 @@ public class CloudchunkProperties {
     public void setSmtp(Smtp smtp) { this.smtp = smtp; }
     public WebSocket getWebSocket() { return webSocket; }
     public void setWebSocket(WebSocket webSocket) { this.webSocket = webSocket; }
+    public Retention getRetention() { return retention; }
+    public void setRetention(Retention retention) { this.retention = retention; }
 }
