@@ -10,6 +10,7 @@ export function AiAgentHistory() {
   const [renames,setRenames]=useState<RenameProposal[]>([]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
+  const [undoBusy,setUndoBusy]=useState<string | null>(null);
   useEffect(()=>{
     if(!open)return;
     const ctrl=new AbortController();
@@ -25,6 +26,22 @@ export function AiAgentHistory() {
     return ()=>ctrl.abort();
   },[open,revision]);
 
+  const undo = async (record: MoveProposal) => {
+    if(undoBusy || record.status!=='APPLIED')return;
+    const question='确定尝试将「'+record.fileName+'」移回原来的文件夹？'+
+      '只有执行后未发生其他修改、原目录仍有效且未超出15分钟才能撤销。';
+    if(!window.confirm(question))return;
+    const ctrl=new AbortController();
+    setUndoBusy(record.id);setError('');
+    try {
+      await knowledgeApi.undoMove(record.id,true,ctrl.signal);
+      setRevision(x=>x+1);
+    } catch(e) {
+      setError(e instanceof Error?e.message:'撤销失败：文件或原目录可能已经变化');
+    } finally {
+      setUndoBusy(null);
+    }
+  };
   return <section className="kw-agent-history" aria-label="AI 文件整理历史">
     <div className="kw-agent-history-header">
       <div><h3>AI 文件整理记录</h3>
@@ -50,7 +67,11 @@ export function AiAgentHistory() {
           {moves.map(record=><div className="kw-agent-history-row" key={'move-'+record.id}>
             <strong>{record.fileName}</strong>
             <span>原目录 {record.sourceParentId===0?'根目录':record.sourceParentId} → {record.destinationName}</span>
-            <small>{record.status==='APPLIED'?'已执行':'未执行（可能已过期）'} · 到期 {record.expiresAt}</small>
+            <small>{record.status==='REVERTED'?'已撤销':record.status==='APPLIED'?'已执行':'未执行（可能已过期）'} · 提议到期 {record.expiresAt}</small>
+            {record.status==='APPLIED' && <button type="button" className="kw-button"
+              disabled={undoBusy!==null} onClick={()=>void undo(record)}>
+              {undoBusy===record.id?'正在撤销…':'尝试撤销（限执行后15分钟）'}
+            </button>}
           </div>)}
         </div>
         <div>

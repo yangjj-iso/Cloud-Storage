@@ -150,3 +150,15 @@
   border-bottom:1px solid #edf1ef; font-size:12px; overflow-wrap:anywhere; }
 .kw-agent-history-row strong { font-size:12px; font-weight:650; }
 .kw-agent-history-row small { font-size:11px; color:var(--kw-muted); }
+
+.kw-batch-organizer { border:1px solid #c7ddcf; border-radius:14px; margin:18px 0;
+  padding:17px; background:#f9fcfa; }
+.kw-batch-organizer h3 { font-size:16px; margin:8px 0; }
+.kw-batch-choice-list { max-height:150px; overflow-y:auto; background:#fff; border:1px solid #dce9e1;
+  border-radius:8px; padding:8px; margin:10px 0; display:grid; gap:8px; }
+.kw-batch-choice-list label { display:flex; gap:9px; align-items:center; font-size:12px; overflow-wrap:anywhere; }
+.kw-batch-preview { display:grid; gap:12px; padding-top:12px; }
+.kw-batch-preview-item { display:grid; gap:7px; padding:13px; border:1px solid #d9e8e0;
+  border-radius:9px; background:#fff; font-size:12px; }
+.kw-batch-preview-item strong { font-size:13px; }
+.kw-batch-preview-item .kw-consent { margin-top:3px; }

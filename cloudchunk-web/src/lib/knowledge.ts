@@ -54,9 +54,14 @@ export interface FolderChoices { folders: FolderOption[]; hasMore: boolean }
 export interface MoveProposal {
   id: string; userFileId: string; fileName: string;
   sourceParentId: number; destinationId: number; destinationName: string;
-  expiresAt: string; status: 'PENDING' | 'APPLIED';
+  expiresAt: string; status: 'PENDING' | 'APPLIED' | 'REVERTED';
 }
 export interface MoveApplyResult { proposalId: string; userFileId: string; destinationId: number; status: string }
+export interface MoveUndoResult { proposalId: string; userFileId: string; restoredParentId: number; status: 'REVERTED' }
+export interface BatchPreviewItem {
+  source: SourceRef; proposal: MoveProposal | null; status: 'READY' | 'SKIPPED';
+}
+export interface BatchMovePreview { items: BatchPreviewItem[]; proposed: number; skipped: number }
 export interface AnswerResponse {
   answer: string;
   citations: { citationId: string; evidence: Evidence }[];
@@ -133,6 +138,10 @@ export const knowledgeApi = {
     request<MoveApplyResult>('/assistant/move/'+encodeURIComponent(id)+'/apply',signal,{confirmed}),
   recentMoveProposals: (signal: AbortSignal) =>
     request<MoveProposal[]>('/assistant/move/recent',signal),
+  previewBatchMove: (sources: SourceRef[],candidateFolderIds: number[],consent: boolean,signal: AbortSignal) =>
+    request<BatchMovePreview>('/assistant/move/batch/suggest',signal,{sources,candidateFolderIds,consent}),
+  undoMove: (proposalId: string,confirmed: boolean,signal: AbortSignal) =>
+    request<MoveUndoResult>('/assistant/move/'+encodeURIComponent(proposalId)+'/undo',signal,{confirmed}),
   autoAsk: (question: string, consent: boolean, signal: AbortSignal) =>
     request<AutoAskResponse>('/assistant/ask', signal, { question, consent }),
   answer: (question: string, sources: SourceRef[], consent: boolean, signal: AbortSignal) =>
