@@ -6,6 +6,7 @@ import com.cloudchunk.common.enums.TranscodeStatus;
 import com.cloudchunk.common.util.MimeUtils;
 import com.cloudchunk.contract.event.BlobBroken;
 import com.cloudchunk.contract.event.ChecksumRequested;
+import com.cloudchunk.contract.event.FileAvailable;
 import com.cloudchunk.contract.event.IntegrationEventPublisher;
 import com.cloudchunk.contract.event.TranscodeRequested;
 import com.cloudchunk.contract.storage.ObjectDeletionQueue;
@@ -13,7 +14,7 @@ import com.cloudchunk.core.file.service.FileMetaService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Commits checksum state and its follow-up event atomically through the outbox. */
+/** Commits checksum state and its follow-up events atomically through the outbox. */
 @Service
 public class ChecksumTransitionService {
 
@@ -35,6 +36,8 @@ public class ChecksumTransitionService {
             return false;
         }
 
+        // Independent from transcode routing: even files with no media tag publish availability.
+        eventPublisher.enqueue(FileAvailable.TOPIC, source.getFileId(), FileAvailable.of(source.getFileId()));
         String tag = MimeUtils.tag(source.getMimeType());
         if (tag == null) {
             fileMetaService.updateTranscodeStatus(source.getFileId(), TranscodeStatus.SKIP);
