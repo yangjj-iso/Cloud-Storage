@@ -3,6 +3,7 @@ package com.cloudchunk.core.knowledge;
 import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
 import org.springframework.core.env.Environment;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -53,17 +54,33 @@ public class AiDailyCallBudget {
         int max = limit(kind);
         if (max <= 0) throw BizException.of(ErrorCode.AI_BUDGET_EXHAUSTED);
         LocalDate day = LocalDate.now(ZoneOffset.UTC);
-        tx.executeWithoutResult(status -> {
-            jdbc.update("""
-                INSERT IGNORE INTO ai_model_daily_usage(user_id, usage_date, model_kind, used_calls)
-                VALUES (?,?,?,0)
-                """, userId, day, kind.name());
-            int accepted = jdbc.update("""
-                UPDATE ai_model_daily_usage SET used_calls=used_calls+1
-                WHERE user_id=? AND usage_date=? AND model_kind=? AND used_calls < ?
-                """, userId, day, kind.name(), max);
-            if (accepted != 1) throw BizException.of(ErrorCode.AI_BUDGET_EXHAUSTED);
-        });
+        // Concurrent INSERT IGNORE + UPDATE of the same new daily row can deadlock
+        // under InnoDB. Retry ONLY a transaction rolled back for lock contention.
+        // Never retry on connection/commit ambiguity, which could double-charge.
+        for (int attempt = 0; attempt < 10; attempt++) {
+            try {
+                tx.executeWithoutResult(status -> {
+                    jdbc.update("""
+                        INSERT IGNORE INTO ai_model_daily_usage(user_id, usage_date, model_kind, used_calls)
+                        VALUES (?,?,?,0)
+                        """, userId, day, kind.name());
+                    int accepted = jdbc.update("""
+                        UPDATE ai_model_daily_usage SET used_calls=used_calls+1
+                        WHERE user_id=? AND usage_date=? AND model_kind=? AND used_calls < ?
+                        """, userId, day, kind.name(), max);
+                    if (accepted != 1) throw BizException.of(ErrorCode.AI_BUDGET_EXHAUSTED);
+                });
+                return;
+            } catch (PessimisticLockingFailureException rolledBackDeadlock) {
+                if (attempt == 9) throw rolledBackDeadlock;
+                try {
+                    Thread.sleep((attempt + 1L) * 8L + (userId % 5));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("model budget transaction interrupted");
+                }
+            }
+        }
     }
 
     private Counter counter(long userId, Kind kind, LocalDate day) {
