@@ -31,7 +31,14 @@ export const createDriveSlice: AppSlice<DriveSlice> = (set, get) => ({
   },
 });
 
-async function runDriveAction(get: () => import('./types').AppState, action: () => Promise<unknown>, success: string, failure: string) {
-  try { await action(); get().showToast({ kind: 'success', title: success }); void get().refreshDrive() }
-  catch (error) { get().showToast({ kind: 'error', title: failure, description: (error as Error).message }) }
+async function runDriveAction(get: () => import('./types').AppState, action: () => Promise<unknown>, success: string, failure: string): Promise<boolean> {
+  try {
+    await action();
+    get().showToast({ kind: 'success', title: success });
+    void get().refreshDrive();
+    return true;
+  } catch (error) {
+    get().showToast({ kind: 'error', title: failure, description: (error as Error).message });
+    return false;
+  }
 }
