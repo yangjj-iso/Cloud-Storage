@@ -72,7 +72,8 @@ public class OpenAiCompatibleEmbeddingGateway implements EmbeddingGateway {
                 byte[] bytes=in.readNBytes(65537);
                 if(res.statusCode()!=200 || bytes.length>65536)
                     throw BizException.of(ErrorCode.AI_PROVIDER_UNAVAILABLE);
-                JsonNode values=mapper.readTree(bytes).path("data").path(0).path("embedding");
+                JsonNode root=mapper.readTree(bytes);
+                JsonNode values=root.path("data").path(0).path("embedding");
                 if(!values.isArray() || values.size()!=dimensions)
                     throw BizException.of(ErrorCode.AI_PROVIDER_UNAVAILABLE);
                 double[] result=new double[dimensions];double norm=0;
@@ -83,7 +84,7 @@ public class OpenAiCompatibleEmbeddingGateway implements EmbeddingGateway {
                     norm+=result[i]*result[i];
                 }
                 if(!Double.isFinite(norm) || norm<=0)throw BizException.of(ErrorCode.AI_PROVIDER_UNAVAILABLE);
-                return new Embedding(result,ModelTokenUsage.fromEmbedding(mapper.readTree(bytes)));
+                return new Embedding(result,ModelTokenUsage.fromEmbedding(root));
             }
         } catch(BizException e){throw e;}
         catch(InterruptedException e){

@@ -28,7 +28,7 @@ class GroundedAnswerServiceTest {
         assertEquals(ErrorCode.AI_DISABLED,assertThrows(BizException.class,
                 () -> service.answer(7,request(true))).getErrorCode());
         verifyNoInteractions(knowledge);
-        verify(gateway,never()).complete(anyString(),anyList());
+        verify(gateway,never()).completeWithUsage(anyString(),anyList());
     }
     @Test void lackOfConsentAndRevokedEvidenceBlockExternalCalls() {
         var knowledge=mock(KnowledgeService.class);var gateway=mock(ChatGateway.class);
@@ -38,23 +38,27 @@ class GroundedAnswerServiceTest {
                 () -> service.answer(7,request(false))).getErrorCode());
         assertEquals(ErrorCode.AI_SOURCE_CHANGED,assertThrows(BizException.class,
                 () -> service.answer(7,request(true))).getErrorCode());
-        verify(gateway,never()).complete(anyString(),anyList());
+        verify(gateway,never()).completeWithUsage(anyString(),anyList());
     }
     @Test void requiresAllowedCitations() {
         var knowledge=mock(KnowledgeService.class);var gateway=mock(ChatGateway.class);
         when(gateway.configured()).thenReturn(true);
         when(knowledge.source(7L,101L,3L,0)).thenReturn(E);
         var service=assistant(knowledge,gateway,true);
-        when(gateway.complete(anyString(),anyList())).thenReturn("没有引用");
+        when(gateway.completeWithUsage(anyString(),anyList())).thenReturn(
+            new ChatGateway.Completion("没有引用",ModelTokenUsage.unknown()));
         assertEquals(ErrorCode.AI_UNGROUNDED,assertThrows(BizException.class,
                 () -> service.answer(7,request(true))).getErrorCode());
-        when(gateway.complete(anyString(),anyList())).thenReturn("无效零编号[S0]和有效编号[S1]");
+        when(gateway.completeWithUsage(anyString(),anyList())).thenReturn(
+            new ChatGateway.Completion("无效零编号[S0]和有效编号[S1]",ModelTokenUsage.unknown()));
         assertEquals(ErrorCode.AI_UNGROUNDED,assertThrows(BizException.class,
                 () -> service.answer(7,request(true))).getErrorCode());
-        when(gateway.complete(anyString(),anyList())).thenReturn("错误编号[S8]");
+        when(gateway.completeWithUsage(anyString(),anyList())).thenReturn(
+            new ChatGateway.Completion("错误编号[S8]",ModelTokenUsage.unknown()));
         assertEquals(ErrorCode.AI_UNGROUNDED,assertThrows(BizException.class,
                 () -> service.answer(7,request(true))).getErrorCode());
-        when(gateway.complete(anyString(),anyList())).thenReturn("证据支持的内容[S1]");
+        when(gateway.completeWithUsage(anyString(),anyList())).thenReturn(
+            new ChatGateway.Completion("证据支持的内容[S1]",ModelTokenUsage.unknown()));
         var answer=service.answer(7,request(true));
         assertEquals("MODEL_WITH_CITATIONS",answer.mode());
         assertEquals("S1",answer.citations().getFirst().citationId());
@@ -72,13 +76,14 @@ class GroundedAnswerServiceTest {
         var service=new GroundedAnswerService(knowledge,gateway,env,budget);
         assertEquals(ErrorCode.AI_BUDGET_EXHAUSTED,assertThrows(BizException.class,
             () -> service.answer(7,request(true))).getErrorCode());
-        verify(gateway,never()).complete(anyString(),anyList());
+        verify(gateway,never()).completeWithUsage(anyString(),anyList());
     }
     @Test void reauthorizationAfterInferenceDetectsRevocation() {
         var knowledge=mock(KnowledgeService.class);var gateway=mock(ChatGateway.class);
         when(gateway.configured()).thenReturn(true);
         when(knowledge.source(7L,101L,3L,0)).thenReturn(E,(Evidence)null);
-        when(gateway.complete(anyString(),anyList())).thenReturn("基于资料[S1]");
+        when(gateway.completeWithUsage(anyString(),anyList())).thenReturn(
+            new ChatGateway.Completion("基于资料[S1]",ModelTokenUsage.unknown()));
         assertEquals(ErrorCode.AI_SOURCE_CHANGED,assertThrows(BizException.class,
                 () -> assistant(knowledge,gateway,true).answer(7,request(true))).getErrorCode());
     }

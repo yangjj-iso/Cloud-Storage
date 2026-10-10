@@ -30,7 +30,7 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 8,"V8 must actually execute");
+        assertTrue(result.migrationsExecuted >= 9,"V9 must actually execute");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
@@ -104,7 +104,10 @@ class KnowledgeIsolationIT {
         when(gateway.configured()).thenReturn(true);
         when(gateway.modelKey()).thenReturn("a".repeat(64));
         when(gateway.dimensions()).thenReturn(8);
-        when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
+        when(gateway.embedWithUsage(anyString())).thenReturn(
+            new com.cloudchunk.core.knowledge.EmbeddingGateway.Embedding(
+                new double[]{1,0,0,0,0,0,0,0},
+                com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
         var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
             jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
             new DataSourceTransactionManager(jdbc.getDataSource()),mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
@@ -136,7 +139,10 @@ class KnowledgeIsolationIT {
         when(gateway.configured()).thenReturn(true);
         when(gateway.modelKey()).thenReturn("b".repeat(64));
         when(gateway.dimensions()).thenReturn(8);
-        when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
+        when(gateway.embedWithUsage(anyString())).thenReturn(
+            new com.cloudchunk.core.knowledge.EmbeddingGateway.Embedding(
+                new double[]{1,0,0,0,0,0,0,0},
+                com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
         var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
             jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
             new DataSourceTransactionManager(jdbc.getDataSource()),mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
@@ -176,6 +182,18 @@ class KnowledgeIsolationIT {
             guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING);
             guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING);
             assertEquals(0,guard.snapshot(7).embedding().remaining());
+        guard.recordReported(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.CHAT,
+            new com.cloudchunk.core.knowledge.ModelTokenUsage(120,30,true));
+        guard.recordReported(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING,
+            new com.cloudchunk.core.knowledge.ModelTokenUsage(9,0,true));
+        guard.recordReported(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING,
+            com.cloudchunk.core.knowledge.ModelTokenUsage.unknown());
+        assertEquals(1,guard.snapshot(7).chat().reportedCalls());
+        assertEquals(120,guard.snapshot(7).chat().inputTokens());
+        assertEquals(30,guard.snapshot(7).chat().outputTokens());
+        assertEquals(1,guard.snapshot(7).embedding().reportedCalls());
+        assertEquals(9,guard.snapshot(7).embedding().inputTokens());
+        assertNull(guard.snapshot(7).chat().estimatedUsd(),"without prices estimate is unknown");
             assertThrows(com.cloudchunk.common.exception.BizException.class,
                 () -> guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING));
         } finally {pool.shutdownNow();}
@@ -187,7 +205,10 @@ class KnowledgeIsolationIT {
         when(gateway.configured()).thenReturn(true);
         when(gateway.modelKey()).thenReturn(modelKey);
         when(gateway.dimensions()).thenReturn(8);
-        when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
+        when(gateway.embedWithUsage(anyString())).thenReturn(
+            new com.cloudchunk.core.knowledge.EmbeddingGateway.Embedding(
+                new double[]{1,0,0,0,0,0,0,0},
+                com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
         var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
             jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
             new DataSourceTransactionManager(jdbc.getDataSource()),
