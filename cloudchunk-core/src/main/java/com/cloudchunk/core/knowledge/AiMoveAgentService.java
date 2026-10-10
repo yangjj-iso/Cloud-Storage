@@ -26,7 +26,14 @@ import java.util.regex.Pattern;
  */
 @Service
 public class AiMoveAgentService {
-    public record SuggestRequest(SourceRef source,boolean consent) {}
+    public record SuggestRequest(SourceRef source,boolean consent,List<Long> candidateFolderIds) {
+        /** Legacy callers use the original bounded default; new UI sends explicit owner-selected IDs. */
+        public SuggestRequest(SourceRef source,boolean consent) {
+            this(source,consent,null);
+        }
+    }
+    public record FolderOption(long id,String name,long parentId) {}
+    public record FolderChoices(List<FolderOption> folders,boolean hasMore) {}
     public record ApplyRequest(boolean confirmed) {}
     public record Capabilities(boolean enabled,String operation) {}
     public record Proposal(String id,String userFileId,String fileName,long sourceParentId,
@@ -58,6 +65,27 @@ public class AiMoveAgentService {
     public Capabilities capabilities() {
         return new Capabilities(enabled && chat.configured(),"SINGLE_FILE_MOVE_WITH_CONFIRMATION");
     }
+    /** Preview candidate folders without sending anything to a model or charging quota. */
+    public FolderChoices folderChoices(long userId,long sourceUserFileId) {
+        if(!capabilities().enabled())throw BizException.of(ErrorCode.AI_DISABLED);
+        List<Long> rows=jdbc.query("""
+            SELECT u.parent_id FROM user_file u
+            JOIN file_meta f ON f.file_id=u.file_id AND f.status=2
+            JOIN knowledge_document k ON k.file_id=u.file_id AND k.status IN ('READY','PARTIAL')
+            WHERE u.id=? AND u.user_id=? AND u.status=0 AND u.is_dir=0
+            LIMIT 1
+            """,(rs,n)->rs.getLong(1),sourceUserFileId,userId);
+        if(rows.isEmpty())throw BizException.of(ErrorCode.FILE_NOT_FOUND);
+        List<Folder> folders=jdbc.query("""
+            SELECT id,file_name,parent_id,updated_at FROM user_file
+            WHERE user_id=? AND status=0 AND is_dir=1 AND id<>?
+            ORDER BY file_name,id LIMIT 101
+            """,(rs,n)->new Folder(rs.getLong(1),rs.getString(2),rs.getLong(3),
+                rs.getTimestamp(4).toLocalDateTime()),userId,rows.getFirst());
+        return new FolderChoices(folders.stream().limit(100)
+            .map(f->new FolderOption(f.id(),f.name(),f.parentId())).toList(),
+            folders.size()>100);
+    }
     public Proposal suggest(long userId,SuggestRequest request) {
         if(!capabilities().enabled())throw BizException.of(ErrorCode.AI_DISABLED);
         if(request==null || !request.consent() || request.source()==null)
@@ -71,7 +99,7 @@ public class AiMoveAgentService {
         FileSnapshot snapshot=fileSnapshot(userId,fileId,source.generation());
         if(before==null || snapshot==null || !snapshot.name().equals(before.fileName()))
             throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
-        List<Folder> folders=availableFolders(userId,snapshot.parentId());
+        List<Folder> folders=resolveCandidates(userId,snapshot.parentId(),request.candidateFolderIds());
         if(folders.isEmpty())throw BizException.of(ErrorCode.INVALID_PARAMETER,
             "当前没有可供归类的其他文件夹，请先创建一个文件夹");
         // Names in this JSON are data, never commands or URLs. The chosen number is checked
@@ -91,6 +119,9 @@ public class AiMoveAgentService {
         budget.recordReported(userId,AiDailyCallBudget.Kind.CHAT,completion.usage());
         int selection=validatedChoice(completion.text(),folders.size());
         Folder chosen=folders.get(selection-1);
+        if(hasSiblingConflict(userId,chosen.id(),snapshot.name(),fileId))
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,
+                "目标文件夹已有同名条目，请重新选择其他文件夹");
 
         // The user might have recycled, reindexed, renamed or moved either object during inference.
         Evidence now=knowledge.source(userId,fileId,source.generation(),source.chunkIndex());
@@ -156,6 +187,11 @@ public class AiMoveAgentService {
             throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
         if(knowledge.source(userId,p.userFileId(),p.generation(),p.chunkIndex())==null)
             throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
+        // The destination folder was locked above; block known sibling collisions at
+        // execution time, too. This does not replace a database-wide unique constraint.
+        if(hasSiblingConflict(userId,p.destinationId(),p.originalName(),p.userFileId()))
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,
+                "目标文件夹已有同名条目，已取消本次移动");
         drive.move(p.userFileId(),userId,p.destinationId());
         jdbc.update("""
             UPDATE ai_move_proposal SET status='APPLIED',applied_at=NOW(3)
@@ -186,6 +222,32 @@ public class AiMoveAgentService {
             rs.getLong(5),rs.getString(6),rs.getTimestamp(7).toLocalDateTime().toString(),
             rs.getString(8));
     }
+    /** Server-side validation of the exact list the human selected. */
+    private List<Folder> resolveCandidates(long userId,long sourceParentId,List<Long> selected) {
+        if(selected==null)return availableFolders(userId,sourceParentId);
+        if(selected.isEmpty() || selected.size()>12 ||
+            selected.stream().anyMatch(id->id==null || id<=0) ||
+            new java.util.HashSet<>(selected).size()!=selected.size())
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,"请选择 1 至 12 个互不重复的候选文件夹");
+        List<Folder> folders=new ArrayList<>();
+        for(Long id:selected) {
+            Folder f=folder(userId,id);
+            if(f==null || f.id()==sourceParentId)
+                throw BizException.of(ErrorCode.INVALID_PARAMETER,"候选文件夹已失效或无访问权限");
+            folders.add(f);
+        }
+        return folders;
+    }
+    /** Checks a same-name sibling in a directory; safe to invoke inside the move transaction. */
+    private boolean hasSiblingConflict(long userId,long parentId,String fileName,long ownId) {
+        List<Long> rows=jdbc.query("""
+            SELECT id FROM user_file
+            WHERE user_id=? AND parent_id=? AND file_name=? AND status=0 AND id<>?
+            LIMIT 1
+            """,(rs,n)->rs.getLong(1),userId,parentId,fileName,ownId);
+        return !rows.isEmpty();
+    }
+
     private List<Folder> availableFolders(long userId,long sourceParentId) {
         return jdbc.query("""
             SELECT id,file_name,parent_id,updated_at FROM user_file
