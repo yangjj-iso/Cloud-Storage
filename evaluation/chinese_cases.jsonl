@@ -1,0 +1,12 @@
+{"id":"C01","query":"如何校验上传后文件是否完整？","relevant":["上传完整性.md"],"modes":["hybrid"]}
+{"id":"C02","query":"断点续传的分片怎么处理？","relevant":["上传完整性.md"],"modes":["keyword","hybrid"]}
+{"id":"C03","query":"回收站中的文件能不能直接被搜索到？","relevant":["文件生命周期.md"],"modes":["hybrid"]}
+{"id":"C04","query":"如何恢复回收站文件？","relevant":["文件生命周期.md"],"modes":["keyword","hybrid"]}
+{"id":"C05","query":"无权限时可以查到别人的文档吗？","relevant":["权限隔离.md"],"modes":["hybrid"]}
+{"id":"C06","query":"跨用户隔离有哪些规定？","relevant":["权限隔离.md"],"modes":["keyword","hybrid"]}
+{"id":"C07","query":"Qdrant 失联会怎样？","relevant":["向量索引.md"],"modes":["keyword","hybrid"]}
+{"id":"C08","query":"向量搜索要验证哪些文件权限？","relevant":["向量索引.md","权限隔离.md"],"modes":["hybrid"]}
+{"id":"C09","query":"每日模型调用预算怎么控制？","relevant":["模型使用.md"],"modes":["keyword","hybrid"]}
+{"id":"C10","query":"Token 用量是否代表实际费用？","relevant":["模型使用.md"],"modes":["hybrid"]}
+{"id":"C11","query":"扫描件 OCR 为什么无法检索？","relevant":["内容理解.md"],"modes":["keyword","hybrid"]}
+{"id":"C12","query":"文档摘要能不能证明模型答案一定正确？","relevant":["内容理解.md"],"modes":["hybrid"]}
