@@ -149,6 +149,7 @@ npm run dev
 - [基准测试](./docs/08-benchmark-metrics.md)：可复现命令和指标解释。
 - [架构加固说明](./docs/09-architecture-hardening.md)：模块边界、可靠事件、迁移、运行时拆分与验证。
 - [可观测性与链路追踪](./docs/10-observability.md)：指标、日志、Jaeger 以及异步 Trace 上下文传播。
+- [AI 证据问答](./docs/12-ai-grounded-answer.md)：可选模型配置、单次授权、引用验证和使用边界。
 
 ## 验证
 
