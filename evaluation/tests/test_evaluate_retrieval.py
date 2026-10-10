@@ -15,6 +15,12 @@ class RetrievalEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["mrr_at_10"], 0.5)
         self.assertEqual(result["cases"], 3)
 
+    def test_recall_counts_each_relevant_document_not_just_any_hit(self):
+        cases = [{"id": "A", "relevant": ["a.md", "b.md"]}]
+        result = score(cases, {"A": ["unrelated.md", "a.md"]})
+        self.assertEqual(result["recall_at_5"], 0.5)
+        self.assertEqual(result["mrr_at_10"], 0.5)
+
     def test_missing_case_is_failure_not_silently_skipped(self):
         cases = [{"id": "A", "relevant": ["a"]}, {"id": "B", "relevant": ["b"]}]
         result = score(cases, {"A": ["a"]})

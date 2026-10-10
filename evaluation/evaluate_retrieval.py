@@ -37,8 +37,7 @@ def score(cases, ranked_by_id, k=5, mrr_k=10):
         relevant = set(case["relevant"])
         if not relevant:
             raise ValueError("relevant list is empty")
-        if any(name in relevant for name in ranked[:k]):
-            hit += 1
+        hit += len(set(ranked[:k]) & relevant) / len(relevant)
         for rank, name in enumerate(ranked[:mrr_k], 1):
             if name in relevant:
                 mrr += 1.0 / rank
