@@ -13,7 +13,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Locale;
 import java.util.Set;
 
 @Component
@@ -47,7 +46,6 @@ public class OperationAuditFilter extends OncePerRequestFilter {
             completed = true;
         } finally {
             long costMs = (System.nanoTime() - started) / 1_000_000L;
-            String area = area(request.getRequestURI());
             String opType = DriveOperationHistory.classify(request.getRequestURI(),request.getMethod());
             boolean success = completed && response.getStatus() < 400;
             auditService.record(UserContext.get(), opType, request.getRequestURI(),
