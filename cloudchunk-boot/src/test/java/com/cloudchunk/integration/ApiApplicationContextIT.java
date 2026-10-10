@@ -95,6 +95,8 @@ class ApiApplicationContextIT {
                 com.cloudchunk.core.upload.task.ChecksumCompensationTask.class)).isEmpty();
         assertThat(context.getBeanNamesForType(
                 com.cloudchunk.core.file.task.ObjectGcWorker.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(
+                com.cloudchunk.core.knowledge.QdrantMirrorWorker.class)).isEmpty();
     }
 
     /** api profile 排除了 RocketMQ 自动配置，模板不该存在。 */

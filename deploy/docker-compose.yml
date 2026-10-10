@@ -8,6 +8,7 @@ volumes:
   mysql-data:
   redis-data:
   minio-data:
+  qdrant-data:
   rmq-store:
   prometheus-data:
   grafana-data:
@@ -119,6 +120,18 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional vector service; REST is bound to loopback, not the public interface.
+  qdrant:
+    profiles: ["vector"]
+    image: qdrant/qdrant:v1.15.0
+    container_name: cc-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+    networks: [cloudchunk-net]
+
   # minio-init removed: MinioStorageStrategy auto-creates the bucket on startup.
 
   api:
@@ -154,6 +167,11 @@ services:
       TRACING_SAMPLING: ${TRACING_SAMPLING:-0.0}
       OTLP_TRACES_ENDPOINT: ${OTLP_TRACES_ENDPOINT:-http://jaeger:4318/v1/traces}
       PROMETHEUS_PUBLIC: ${PROMETHEUS_PUBLIC:-false}
+      AI_QDRANT_ENABLED: ${AI_QDRANT_ENABLED:-false}
+      AI_QDRANT_URL: ${AI_QDRANT_URL:-http://qdrant:6333}
+      AI_QDRANT_ALLOW_HTTP: ${AI_QDRANT_ALLOW_HTTP:-false}
+      AI_QDRANT_API_KEY: ${AI_QDRANT_API_KEY:-}
+      AI_QDRANT_COLLECTION_PREFIX: ${AI_QDRANT_COLLECTION_PREFIX:-cloudchunk_ai}
     ports:
       - "8080:8080"
     extra_hosts:
@@ -186,6 +204,11 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_AK: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SK: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AI_QDRANT_ENABLED: ${AI_QDRANT_ENABLED:-false}
+      AI_QDRANT_URL: ${AI_QDRANT_URL:-http://qdrant:6333}
+      AI_QDRANT_ALLOW_HTTP: ${AI_QDRANT_ALLOW_HTTP:-false}
+      AI_QDRANT_API_KEY: ${AI_QDRANT_API_KEY:-}
+      AI_QDRANT_COLLECTION_PREFIX: ${AI_QDRANT_COLLECTION_PREFIX:-cloudchunk_ai}
       TRACING_SAMPLING: ${TRACING_SAMPLING:-0.0}
       OTLP_TRACES_ENDPOINT: ${OTLP_TRACES_ENDPOINT:-http://jaeger:4318/v1/traces}
     extra_hosts:

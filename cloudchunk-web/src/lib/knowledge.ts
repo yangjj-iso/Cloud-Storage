@@ -23,7 +23,7 @@ export interface Evidence {
   status: KnowledgeStatus;
 }
 export interface Library { documents: KnowledgeDocument[]; hasMore: boolean; page: number }
-export interface SearchResult { evidence: Evidence[]; hasMore: boolean; mode: 'LITERAL_KEYWORD' | 'HYBRID_RRF_LIMITED' | 'SEMANTIC_NOT_INDEXED' | 'KEYWORD_FALLBACK' | 'SEMANTIC_DISABLED' }
+export interface SearchResult { evidence: Evidence[]; hasMore: boolean; mode: 'LITERAL_KEYWORD' | 'HYBRID_RRF_LIMITED' | 'SEMANTIC_NOT_INDEXED' | 'KEYWORD_FALLBACK' | 'SEMANTIC_DISABLED' | 'QDRANT_HYBRID_RRF_LIMITED' | 'QDRANT_FALLBACK' | 'QDRANT_WARMING' }
 export interface BlockPage { blocks: Evidence[]; hasMore: boolean; page: number }
 export interface AssistantCapabilities { enabled: boolean; retrievalMode: 'SELECTED_KEYWORD_EVIDENCE' }
 export interface SemanticCapabilities { enabled: boolean; retrievalMode: string }
