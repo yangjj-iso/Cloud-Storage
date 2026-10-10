@@ -62,6 +62,10 @@ public class OpenAiCompatibleChatGateway implements ChatGateway {
     }
 
     @Override public String complete(String question, List<CitedSource> sources) {
+        return completeWithUsage(question,sources).text();
+    }
+
+    @Override public Completion completeWithUsage(String question,List<CitedSource> sources) {
         if (!configured()) throw BizException.of(ErrorCode.AI_DISABLED);
         try {
             List<Map<String, String>> evidence = new ArrayList<>();
@@ -93,7 +97,7 @@ public class OpenAiCompatibleChatGateway implements ChatGateway {
                 if (!content.isTextual() || content.asText().isBlank()) {
                     throw BizException.of(ErrorCode.AI_PROVIDER_UNAVAILABLE);
                 }
-                return content.asText().strip();
+                return new Completion(content.asText().strip(),ModelTokenUsage.fromChat(root));
             }
         } catch (BizException e) { throw e; }
         catch (InterruptedException e) {

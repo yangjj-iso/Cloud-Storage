@@ -52,6 +52,10 @@ public class OpenAiCompatibleEmbeddingGateway implements EmbeddingGateway {
     @Override public int dimensions(){return dimensions;}
 
     @Override public double[] embed(String text) {
+        return embedWithUsage(text).vector();
+    }
+
+    @Override public Embedding embedWithUsage(String text) {
         if(!configured())throw BizException.of(ErrorCode.AI_DISABLED);
         if(text==null || text.isBlank() || text.length()>2000)
             throw BizException.of(ErrorCode.INVALID_PARAMETER,"invalid embedding input");
@@ -79,7 +83,7 @@ public class OpenAiCompatibleEmbeddingGateway implements EmbeddingGateway {
                     norm+=result[i]*result[i];
                 }
                 if(!Double.isFinite(norm) || norm<=0)throw BizException.of(ErrorCode.AI_PROVIDER_UNAVAILABLE);
-                return result;
+                return new Embedding(result,ModelTokenUsage.fromEmbedding(mapper.readTree(bytes)));
             }
         } catch(BizException e){throw e;}
         catch(InterruptedException e){
