@@ -33,7 +33,7 @@ public class DriveOperationHistory {
                 if(path.equals("/api/v1/drive/rename"))return "DRIVE_RENAME";
                 if(path.equals("/api/v1/drive/move"))return "DRIVE_MOVE";
                 if(path.matches("^/api/v1/recycle/[0-9]+/restore$"))return "DRIVE_RESTORE";
-                if(path.matches("^/api/v1/recycle/[0-9]+/hard-delete$"))return "DRIVE_PURGE";
+                if(path.equals("/api/v1/share/save"))return "SHARE_SAVE";
                 if(path.equals("/api/v1/knowledge/assistant/rename/suggest"))return "AI_RENAME_SUGGEST";
                 if(path.matches("^/api/v1/knowledge/assistant/rename/[a-f0-9-]{36}/apply$"))
                     return "AI_RENAME_APPLY";
@@ -44,10 +44,11 @@ public class DriveOperationHistory {
                     return "AI_MOVE_APPLY";
                 if(path.matches("^/api/v1/knowledge/assistant/move/[a-f0-9-]{36}/undo$"))
                     return "AI_MOVE_UNDO";
-                if(path.matches("^/api/v1/share/[a-zA-Z0-9_-]+/save$"))return "SHARE_SAVE";
+                
             }
             if("DELETE".equals(operation)) {
                 if(path.matches("^/api/v1/drive/[0-9]+$"))return "DRIVE_RECYCLE";
+                if(path.matches("^/api/v1/recycle/[0-9]+$"))return "DRIVE_PURGE";
             }
         }
         String area=path==null?"API":path.replaceFirst("^/api/v1/","").split("/",2)[0];
