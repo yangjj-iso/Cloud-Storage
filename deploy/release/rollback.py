@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config_gate
 import snapshot
 
