@@ -21,12 +21,14 @@ public class SemanticIndexService {
     private static final int MAX_CHUNKS=64;
     private final JdbcTemplate jdbc;
     private final EmbeddingGateway provider;
+    private final AiDailyCallBudget budget;
     private final ObjectMapper mapper;
     private final TransactionTemplate transaction;
 
     public SemanticIndexService(JdbcTemplate jdbc,EmbeddingGateway provider,ObjectMapper mapper,
-                                PlatformTransactionManager manager) {
+                                PlatformTransactionManager manager,AiDailyCallBudget budget) {
         this.jdbc=jdbc;this.provider=provider;this.mapper=mapper;
+        this.budget=budget;
         this.transaction=new TransactionTemplate(manager);
     }
     public Capabilities capabilities() {
@@ -91,7 +93,8 @@ public class SemanticIndexService {
         List<Job> list=jdbc.query("""
             SELECT file_id,generation,model_key,user_id,next_index FROM knowledge_embedding_job
             WHERE model_key=? AND attempts<3
-              AND (status='PENDING' OR (status='RUNNING' AND lease_until<NOW(6)))
+              AND ((status='PENDING' AND (lease_until IS NULL OR lease_until<NOW(6)))
+                  OR (status='RUNNING' AND lease_until<NOW(6)))
             ORDER BY updated_at LIMIT 4
             """,(rs,n)->new Job(rs.getString(1),rs.getLong(2),rs.getString(3),
                 rs.getLong(4),rs.getInt(5),null),provider.modelKey());
@@ -102,20 +105,38 @@ public class SemanticIndexService {
                   lease_until=DATE_ADD(NOW(6),INTERVAL 60 SECOND),
                   attempts=attempts+1,updated_at=NOW(6)
                 WHERE file_id=? AND generation=? AND model_key=? AND user_id=? AND attempts<3
-                  AND (status='PENDING' OR (status='RUNNING' AND lease_until<NOW(6)))
+                  AND ((status='PENDING' AND (lease_until IS NULL OR lease_until<NOW(6)))
+                    OR (status='RUNNING' AND lease_until<NOW(6)))
                 """,token,next.fileId(),next.generation(),next.modelKey(),next.userId());
             if(accepted==0)continue;
             Job job=new Job(next.fileId(),next.generation(),next.modelKey(),
                 next.userId(),next.offset(),token);
-            try{embedOne(job);}catch(Exception ignored){
-                jdbc.update("""
-                    UPDATE knowledge_embedding_job SET status=IF(attempts>=3,'FAILED','PENDING'),
-                      claim_token=NULL,lease_until=NULL,updated_at=NOW(6)
-                    WHERE file_id=? AND generation=? AND model_key=? AND user_id=? AND claim_token=?
-                    """,job.fileId(),job.generation(),job.modelKey(),job.userId(),job.token());
+            try { embedOne(job); }
+            catch(BizException ex) {
+                if(ex.getErrorCode() == ErrorCode.AI_BUDGET_EXHAUSTED) {
+                    // Daily ceiling is not a bad document. Retry after an hour without
+                    // spending a parsing attempt or hot-looping the scheduler.
+                    jdbc.update("""
+                        UPDATE knowledge_embedding_job SET status='PENDING',
+                          attempts=GREATEST(0,attempts-1),claim_token=NULL,
+                          lease_until=DATE_ADD(NOW(6),INTERVAL 1 HOUR),updated_at=NOW(6)
+                        WHERE file_id=? AND generation=? AND model_key=? AND user_id=? AND claim_token=?
+                        """,job.fileId(),job.generation(),job.modelKey(),job.userId(),job.token());
+                } else {
+                    failJob(job);
+                }
+            }catch(Exception ignored){
+                failJob(job);
             }
             return;
         }
+    }
+    private void failJob(Job job) {
+        jdbc.update("""
+            UPDATE knowledge_embedding_job SET status=IF(attempts>=3,'FAILED','PENDING'),
+              claim_token=NULL,lease_until=NULL,updated_at=NOW(6)
+            WHERE file_id=? AND generation=? AND model_key=? AND user_id=? AND claim_token=?
+            """,job.fileId(),job.generation(),job.modelKey(),job.userId(),job.token());
     }
     private void embedOne(Job job) {
         List<Chunk> chunks=jdbc.query("""
@@ -134,8 +155,9 @@ public class SemanticIndexService {
               AND chunk_index=? AND model_key=?
             """,(rs,n)->rs.getInt(1),job.fileId(),job.generation(),job.offset(),job.modelKey());
         // Shared content can reuse vectors, but only after this user opted in.
-        double[] vector=(existing.size()==1 && existing.getFirst()==provider.dimensions())
-            ?null:provider.embed(chunk.content());
+        boolean cached=existing.size()==1 && existing.getFirst()==provider.dimensions();
+        if (!cached) budget.reserve(job.userId(),AiDailyCallBudget.Kind.EMBEDDING);
+        double[] vector=cached ? null : provider.embed(chunk.content());
         if(vector!=null && vector.length!=provider.dimensions())throw new IllegalArgumentException("wrong dimension");
         transaction.executeWithoutResult(s->publish(job,chunk.total(),vector));
     }

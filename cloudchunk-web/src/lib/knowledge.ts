@@ -27,6 +27,8 @@ export interface SearchResult { evidence: Evidence[]; hasMore: boolean; mode: 'L
 export interface BlockPage { blocks: Evidence[]; hasMore: boolean; page: number }
 export interface AssistantCapabilities { enabled: boolean; retrievalMode: 'SELECTED_KEYWORD_EVIDENCE' }
 export interface SemanticCapabilities { enabled: boolean; retrievalMode: string }
+export interface AiCallCounter { used: number; limit: number; remaining: number }
+export interface AiUsageSnapshot { dayUtc: string; chat: AiCallCounter; embedding: AiCallCounter }
 export interface SemanticIndexStatus { status: 'NOT_REQUESTED' | 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'STALE'; completed: number; total: number }
 export interface SourceRef { userFileId: string; generation: number; chunkIndex: number }
 export interface AnswerResponse {
@@ -60,6 +62,7 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown, ove
       700002: '引用来源已经变更或权限已失效，请重新检索',
       700003: '模型服务暂不可用，请稍后重试',
       700004: '模型没有返回有效的引用编号，已拒绝展示答案',
+      700005: '今日模型调用额度已用完（按 UTC 日重置），请明天再试',
     };
     throw new ApiError(result?.code ?? response.status,
       aiMessages[result?.code ?? 0] || result?.message || '资料服务暂不可用，请确认后端已升级并稍后重试', result?.traceId);
@@ -82,6 +85,8 @@ export const knowledgeApi = {
   index: (id: string, signal: AbortSignal) => request<void>(`/documents/${encodeURIComponent(id)}/index`, signal, {}),
   assistantCapabilities: (signal: AbortSignal) =>
     request<AssistantCapabilities>('/assistant/capabilities', signal),
+  aiUsage: (signal: AbortSignal) =>
+    request<AiUsageSnapshot>('/assistant/usage', signal),
   autoAsk: (question: string, consent: boolean, signal: AbortSignal) =>
     request<AutoAskResponse>('/assistant/ask', signal, { question, consent }),
   answer: (question: string, sources: SourceRef[], consent: boolean, signal: AbortSignal) =>

@@ -33,7 +33,8 @@ public enum ErrorCode {
     AI_DISABLED(700001, 503, "AI chat not configured"),
     AI_SOURCE_CHANGED(700002, 409, "AI evidence no longer accessible"),
     AI_PROVIDER_UNAVAILABLE(700003, 503, "AI model unavailable"),
-    AI_UNGROUNDED(700004, 422, "AI answer has no valid citations");
+    AI_UNGROUNDED(700004, 422, "AI answer has no valid citations"),
+    AI_BUDGET_EXHAUSTED(700005, 429, "daily model call limit reached");
 
     private final int code;
     private final int httpStatus;

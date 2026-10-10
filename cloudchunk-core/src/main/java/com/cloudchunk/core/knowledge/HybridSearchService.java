@@ -23,12 +23,14 @@ public class HybridSearchService {
     private final KnowledgeService knowledge;
     private final JdbcTemplate jdbc;
     private final EmbeddingGateway provider;
+    private final AiDailyCallBudget budget;
     private final ObjectMapper mapper;
     private record VectorCandidate(Evidence evidence,double[] vector){}
     private record Scored(Evidence evidence,double score){}
     public HybridSearchService(KnowledgeService knowledge,JdbcTemplate jdbc,
-                               EmbeddingGateway provider,ObjectMapper mapper) {
+                               EmbeddingGateway provider,ObjectMapper mapper,AiDailyCallBudget budget) {
         this.knowledge=knowledge;this.jdbc=jdbc;this.provider=provider;this.mapper=mapper;
+        this.budget=budget;
     }
     public SearchResult search(long userId,String query,boolean consent) {
         if(query==null || query.strip().length()<2 || query.strip().length()>100)
@@ -61,7 +63,10 @@ public class HybridSearchService {
         // No opted-in indexed data: avoid transferring the search text to a model needlessly.
         if(candidates.isEmpty())return new SearchResult(lexical.evidence(),lexical.hasMore(),"SEMANTIC_NOT_INDEXED");
         double[] question;
-        try{question=provider.embed(query.strip());}
+        try{
+            budget.reserve(userId,AiDailyCallBudget.Kind.EMBEDDING);
+            question=provider.embed(query.strip());
+        }
         catch(BizException ex) {
             if(ex.getErrorCode()!=ErrorCode.AI_PROVIDER_UNAVAILABLE)throw ex;
             return fallback(userId,query,"KEYWORD_FALLBACK");

@@ -92,3 +92,14 @@
   border-radius:10px; resize:vertical; line-height:1.7; color:var(--kw-ink); }
 .kw-direct-ask textarea:focus-visible { outline:2px solid #8ab4a1; outline-offset:2px; }
 @media (max-width:640px) { .kw-direct-ask { padding:16px; } }
+
+.kw-usage { margin-top:17px; padding:14px 16px; border-radius:12px; border:1px solid #c9ddd3; background:#ffffffd9; }
+.kw-usage-top { display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:650; color:#306459; }
+.kw-usage-top > span { display:flex; align-items:center; gap:6px; }
+.kw-usage-top .material-symbols-outlined { font-size:17px; }
+.kw-usage-top button { display:flex; padding:4px 7px; border-radius:6px; }
+.kw-usage-top button:hover { background:#e7f2eb; }
+.kw-usage-stats { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:8px; color:var(--kw-muted); font-size:12px; }
+.kw-usage-stats strong { color:var(--kw-ink); }
+.kw-usage-hint { display:block; margin-top:8px; font-size:12px; color:var(--kw-muted); }
+.kw-usage p { margin:8px 0 0; font-size:11px; line-height:1.6; color:var(--kw-muted); }

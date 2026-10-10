@@ -16,10 +16,13 @@ public class AutoAnswerService {
     private static final int MAX_AUTO_SOURCES = 4;
     private final HybridSearchService retrieval;
     private final GroundedAnswerService answers;
+    private final AiDailyCallBudget budget;
 
-    public AutoAnswerService(HybridSearchService retrieval, GroundedAnswerService answers) {
+    public AutoAnswerService(HybridSearchService retrieval, GroundedAnswerService answers,
+                             AiDailyCallBudget budget) {
         this.retrieval = retrieval;
         this.answers = answers;
+        this.budget = budget;
     }
 
     public AutoAskResponse ask(long userId, AutoAskRequest request) {
@@ -29,6 +32,8 @@ public class AutoAnswerService {
             throw BizException.of(ErrorCode.INVALID_PARAMETER,
                     "请输入4至100字符的问题，并授权将查询及自动选中的资料发送到配置的模型服务");
         }
+        // Avoid spending an Embedding call when the user is already out of chat calls.
+        budget.ensureChatAvailable(userId);
         String question = request.question().strip();
         // Hybrid search only uses semantic vectors explicitly authorized by this user.
         // When embedding is disabled, it returns the existing literal search results.

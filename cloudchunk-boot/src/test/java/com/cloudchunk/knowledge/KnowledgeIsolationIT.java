@@ -30,13 +30,14 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 5,"V5 must actually execute");
+        assertTrue(result.migrationsExecuted >= 7,"V7 must actually execute");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
         jdbc.update("DELETE FROM knowledge_document"); jdbc.update("DELETE FROM user_file"); jdbc.update("DELETE FROM file_meta");
+        jdbc.update("DELETE FROM ai_model_daily_usage");
         jdbc.update("""
             INSERT INTO file_meta(file_id,file_md5,file_name,file_size,mime_type,bucket,object_key,owner_id,status)
             VALUES (?,?,'private.txt',30,'text/plain','bucket','object',1,2)
@@ -106,14 +107,15 @@ class KnowledgeIsolationIT {
         when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
         var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
             jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
-            new DataSourceTransactionManager(jdbc.getDataSource()));
+            new DataSourceTransactionManager(jdbc.getDataSource()),mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
         assertThrows(com.cloudchunk.common.exception.BizException.class,()->semantic.request(1,101,false));
         assertThrows(com.cloudchunk.common.exception.BizException.class,()->semantic.request(3,101,true));
         assertEquals("PENDING",semantic.request(1,101,true).status());
         semantic.workOne();
         assertEquals("READY",semantic.status(1,101).status());
         var hybrid=new com.cloudchunk.core.knowledge.HybridSearchService(
-            service,jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper());
+            service,jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
+            mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
         var found=hybrid.search(1,"how do uploads work",true);
         assertEquals("HYBRID_RRF_LIMITED",found.mode());
         assertEquals("101",found.evidence().getFirst().userFileId());
@@ -135,12 +137,46 @@ class KnowledgeIsolationIT {
         when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
         var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
             jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
-            new DataSourceTransactionManager(jdbc.getDataSource()));
+            new DataSourceTransactionManager(jdbc.getDataSource()),mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
         semantic.request(1,101,true);semantic.workOne();
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_vector",Integer.class));
         jdbc.update("DELETE FROM knowledge_document WHERE file_id=?",FILE);
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_vector",Integer.class));
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_embedding_job",Integer.class));
+    }
+    @Test void dailyModelBudgetsAreAtomicAcrossParallelRequestsAndUsers() throws Exception {
+        var env = new org.springframework.mock.env.MockEnvironment()
+            .withProperty("cloudchunk.ai.budget.chat-calls-per-day","3")
+            .withProperty("cloudchunk.ai.budget.embedding-calls-per-day","2");
+        var guard = new com.cloudchunk.core.knowledge.AiDailyCallBudget(
+            jdbc,new DataSourceTransactionManager(jdbc.getDataSource()),env);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(8);
+        try {
+            var futures=new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+            var start=new java.util.concurrent.CountDownLatch(1);
+            for(int i=0;i<24;i++) futures.add(pool.submit(()->{
+                start.await();
+                try {
+                    guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.CHAT);
+                    return true;
+                } catch(com.cloudchunk.common.exception.BizException ex) {
+                    assertEquals(com.cloudchunk.common.exception.ErrorCode.AI_BUDGET_EXHAUSTED,ex.getErrorCode());
+                    return false;
+                }
+            }));
+            start.countDown();
+            int allowed=0;
+            for(var future:futures) if(future.get()) allowed++;
+            assertEquals(3,allowed,"concurrent requests cannot exceed a single UTC-day ceiling");
+            assertEquals(0,guard.snapshot(7).chat().remaining());
+            assertEquals(3,guard.snapshot(7).chat().used());
+            assertEquals(3,guard.snapshot(8).chat().remaining(),"other users retain their quota");
+            guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING);
+            guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING);
+            assertEquals(0,guard.snapshot(7).embedding().remaining());
+            assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING));
+        } finally {pool.shutdownNow();}
     }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
