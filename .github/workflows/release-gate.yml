@@ -83,12 +83,25 @@ jobs:
         working-directory: cloudchunk-web
       - run: python3 -m unittest discover -s evaluation/tests -v
 
+  docker-restore-drill:
+    name: isolated Docker restore smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify disposable Docker is available
+        run: docker info
+      - name: Restore synthetic SQL and cold volumes in isolated disposable Docker
+        run: python3 -m unittest discover -s deploy/release/docker_tests -v
+
   # This job is opt-in and cannot deploy, migrate, back up or alter production.
   # Configure GitHub environment "production" with required reviewers and restrict refs.
   live-readonly:
     name: protected production read-only gate
     if: github.event_name == 'workflow_dispatch' && inputs.live_readonly
-    needs: [static-release, build-verification]
+    needs: [static-release, build-verification, docker-restore-drill]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
