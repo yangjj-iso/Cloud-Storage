@@ -2,6 +2,7 @@ package com.cloudchunk.mq.outbox;
 
 import com.cloudchunk.contract.event.BlobBroken;
 import com.cloudchunk.contract.event.ChecksumRequested;
+import com.cloudchunk.contract.event.FileAvailable;
 import com.cloudchunk.contract.event.IntegrationEvent;
 import com.cloudchunk.contract.event.TranscodeRequested;
 import com.cloudchunk.infra.outbox.OutboxEvent;
@@ -106,6 +107,7 @@ public class OutboxPublisher {
             case "ChecksumRequested" -> ChecksumRequested.class;
             case "TranscodeRequested" -> TranscodeRequested.class;
             case "BlobBroken" -> BlobBroken.class;
+            case "FileAvailable" -> FileAvailable.class;
             default -> throw new IllegalArgumentException("unsupported outbox event: " + row.getEventType());
         };
         return objectMapper.readValue(row.getPayload(), type);

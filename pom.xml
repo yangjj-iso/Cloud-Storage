@@ -24,7 +24,7 @@
         <rocketmq-spring.version>2.3.1</rocketmq-spring.version>
         <minio.version>8.5.11</minio.version>
         <thumbnailator.version>0.4.20</thumbnailator.version>
-        <tika.version>2.9.2</tika.version>
+        <tika.version>3.3.2</tika.version>
         <hutool.version>5.8.28</hutool.version>
         <lombok.version>1.18.34</lombok.version>
         <springdoc.version>2.6.0</springdoc.version>
