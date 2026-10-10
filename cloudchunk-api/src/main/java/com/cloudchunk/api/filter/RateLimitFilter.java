@@ -107,7 +107,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 "/api/v1/knowledge/assistant/answer".equals(path) ||
                 "/api/v1/knowledge/assistant/ask".equals(path) ||
                 "/api/v1/knowledge/assistant/rename/suggest".equals(path) ||
-                "/api/v1/knowledge/assistant/move/suggest".equals(path))) {
+                "/api/v1/knowledge/assistant/move/suggest".equals(path) ||
+                "/api/v1/knowledge/assistant/move/batch/suggest".equals(path))) {
             Long userId = UserContext.get();
             if (userId == null) { rejectUnauthorized(response); return; }
             if (!rateLimiter.tryAcquire("cc:rate:ai-answer:" + userId, 1, 2)) {

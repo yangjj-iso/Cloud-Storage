@@ -7,6 +7,7 @@ import { DirectAskPanel } from './DirectAskPanel';
 import { AiUsageBar } from './AiUsageBar';
 import { VectorHealthStrip } from './VectorHealthStrip';
 import { AiAgentHistory } from './AiAgentHistory';
+import { BatchMovePanel } from './BatchMovePanel';
 import { RenameAgentPanel } from './RenameAgentPanel';
 import { MoveAgentPanel } from './MoveAgentPanel';
 
@@ -188,6 +189,7 @@ export function KnowledgeWorkspace() {
               </button>)}
               {results.hasMore && <p className="kw-footnote">当前显示前 20 个匹配片段，还有更多结果。请使用更具体的关键词；此结果不代表全量统计。</p>}
             </div>}
+            {results && results.evidence.length > 0 && <BatchMovePanel key={'batch-'+searched} results={results} />}
             {results && results.evidence.length > 0 && <AssistantPanel key={searched} results={results} onSourceOpen={setSelection} />}
           </> : <>
             {loading ? <div className="kw-empty" role="status">正在加载资料…</div> : library && library.documents.length === 0 ?

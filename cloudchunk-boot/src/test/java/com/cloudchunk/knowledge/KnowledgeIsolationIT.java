@@ -30,7 +30,7 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 11,"V11 must actually execute");
+        assertTrue(result.migrationsExecuted >= 12,"V12 must actually execute");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
@@ -467,6 +467,103 @@ class KnowledgeIsolationIT {
         // The model also cannot generate a fresh plan into an already conflicting folder.
         assertThrows(com.cloudchunk.common.exception.BizException.class,()->agent.suggest(1,request));
         verifyNoInteractions(drive);
+    }
+    @Test void batchPreviewCreatesOnlyConsentedOwnerScopedSuggestions() {
+        var c=claim();publish(c,"Organizing user files");
+        jdbc.update("""
+            INSERT INTO user_file(id,user_id,file_id,parent_id,file_name,is_dir,status)
+            VALUES(103,1,?,0,'Second.txt',0,0)
+            """,FILE);
+        jdbc.update("""
+            INSERT INTO user_file(id,user_id,parent_id,file_name,is_dir,status)
+            VALUES(201,1,0,'目标目录',1,0)
+            """);
+        var model=mock(com.cloudchunk.core.knowledge.ChatGateway.class);
+        when(model.configured()).thenReturn(true);
+        when(model.completeWithUsage(anyString(),anyList())).thenReturn(
+            new com.cloudchunk.core.knowledge.ChatGateway.Completion(
+                "1 [S1]",com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        var agent=new com.cloudchunk.core.knowledge.AiMoveAgentService(
+            jdbc,service,drive,model,mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class),
+            new com.fasterxml.jackson.databind.ObjectMapper(),
+            new org.springframework.mock.env.MockEnvironment().withProperty("cloudchunk.ai.agent.move-enabled","true"));
+        var ref1=new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",c.generation(),0);
+        var ref2=new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("103",c.generation(),0);
+        var other=new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("102",c.generation(),0);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            agent.batchSuggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.BatchSuggestRequest(
+                java.util.List.of(ref1),java.util.List.of(201L),false)));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            agent.batchSuggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.BatchSuggestRequest(
+                java.util.List.of(ref1,ref1),java.util.List.of(201L),true)));
+        var result=agent.batchSuggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.BatchSuggestRequest(
+            java.util.List.of(ref1,ref2,other),java.util.List.of(201L),true));
+        assertEquals(2,result.proposed());
+        assertEquals(1,result.skipped());
+        assertEquals("SKIPPED",result.items().get(2).status());
+        assertEquals(2,jdbc.queryForObject("SELECT COUNT(*) FROM ai_move_proposal",Integer.class));
+        assertEquals(0L,jdbc.queryForObject("SELECT parent_id FROM user_file WHERE id=101",Long.class));
+        assertEquals(0L,jdbc.queryForObject("SELECT parent_id FROM user_file WHERE id=103",Long.class));
+        verifyNoInteractions(drive);
+    }
+
+    @Test void undoChecksOwnerExpiryFileVersionAndRevertsOnlyOnce() {
+        var c=claim();publish(c,"Approval and safe move");
+        jdbc.update("""
+            INSERT INTO user_file(id,user_id,parent_id,file_name,is_dir,status)
+            VALUES (201,1,0,'目标目录',1,0),(202,1,0,'原目录',1,0)
+            """);
+        jdbc.update("UPDATE user_file SET parent_id=202 WHERE id=101");
+        var model=mock(com.cloudchunk.core.knowledge.ChatGateway.class);
+        when(model.configured()).thenReturn(true);
+        when(model.completeWithUsage(anyString(),anyList())).thenReturn(
+            new com.cloudchunk.core.knowledge.ChatGateway.Completion(
+                "1 [S1]",com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        doAnswer(inv->{
+            jdbc.update("""
+                UPDATE user_file SET parent_id=?,updated_at=DATE_ADD(updated_at,INTERVAL 1 SECOND)
+                WHERE id=101 AND user_id=1
+                """,new Object[]{inv.getArgument(2)});
+            return null;
+        }).when(drive).move(eq(101L),eq(1L),anyLong());
+        var agent=new com.cloudchunk.core.knowledge.AiMoveAgentService(
+            jdbc,service,drive,model,mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class),
+            new com.fasterxml.jackson.databind.ObjectMapper(),
+            new org.springframework.mock.env.MockEnvironment().withProperty("cloudchunk.ai.agent.move-enabled","true"));
+        var ref=new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",c.generation(),0);
+        var plan=agent.suggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(
+            ref,true,java.util.List.of(201L)));
+        tx.executeWithoutResult(t->agent.apply(1,plan.id(),
+            new com.cloudchunk.core.knowledge.AiMoveAgentService.ApplyRequest(true)));
+        assertEquals("APPLIED",jdbc.queryForObject(
+            "SELECT status FROM ai_move_proposal WHERE id=?",String.class,plan.id()));
+        assertNotNull(jdbc.queryForObject(
+            "SELECT applied_file_updated_at FROM ai_move_proposal WHERE id=?",java.sql.Timestamp.class,plan.id()));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->tx.execute(t->
+            agent.undo(2,plan.id(),new com.cloudchunk.core.knowledge.AiMoveAgentService.UndoRequest(true))));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->tx.execute(t->
+            agent.undo(1,plan.id(),new com.cloudchunk.core.knowledge.AiMoveAgentService.UndoRequest(false))));
+        var restored=tx.execute(t->agent.undo(1,plan.id(),
+            new com.cloudchunk.core.knowledge.AiMoveAgentService.UndoRequest(true)));
+        assertNotNull(restored);
+        assertEquals("REVERTED",restored.status());
+        assertEquals(202L,jdbc.queryForObject("SELECT parent_id FROM user_file WHERE id=101",Long.class));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->tx.execute(t->
+            agent.undo(1,plan.id(),new com.cloudchunk.core.knowledge.AiMoveAgentService.UndoRequest(true))));
+        verify(drive,times(2)).move(eq(101L),eq(1L),anyLong());
+        // A later approved move is not undoable after another human modifies the name.
+        var next=agent.suggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(
+            ref,true,java.util.List.of(201L)));
+        tx.executeWithoutResult(t->agent.apply(1,next.id(),
+            new com.cloudchunk.core.knowledge.AiMoveAgentService.ApplyRequest(true)));
+        jdbc.update("UPDATE user_file SET file_name='人工改过.txt' WHERE id=101");
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->tx.execute(t->
+            agent.undo(1,next.id(),new com.cloudchunk.core.knowledge.AiMoveAgentService.UndoRequest(true))));
+        assertEquals("APPLIED",jdbc.queryForObject(
+            "SELECT status FROM ai_move_proposal WHERE id=?",String.class,next.id()));
+        verify(drive,times(3)).move(eq(101L),eq(1L),anyLong());
     }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
