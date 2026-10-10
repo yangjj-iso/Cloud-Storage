@@ -73,3 +73,13 @@
 .kw-answer-sources button:hover { background:#e8f3ed; }
 .kw-answer-sources button .material-symbols-outlined { margin-left:auto; font-size:16px; }
 @media (max-width:640px) { .kw-assistant { padding:16px; }.kw-answer-actions button { width:100%; } }
+
+.kw-search-modes { display:flex; align-items:center; flex-wrap:wrap; gap:9px; margin-top:14px; }
+.kw-search-modes button { display:flex; align-items:center; gap:3px; padding:8px 13px; background:#fff9; border:1px solid #cadbd4; border-radius:999px; color:#47665a; font-size:12px; }
+.kw-search-modes button.kw-mode-active { color:#fff; background:#28665a; border-color:#28665a; }
+.kw-search-modes button .material-symbols-outlined { font-size:16px; }
+.kw-search-modes span { color:var(--kw-muted); font-size:11px; }
+.kw-search-consent { max-width:800px; margin:12px 0 0!important; }
+.kw-search-mode-hint { color:#607487; font-size:12px; line-height:1.8; margin-bottom:12px; }
+.kw-semantic-status { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:11px; color:#28665a; }
+.kw-semantic-status small { color:#8d5b40; font-size:11px; }

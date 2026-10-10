@@ -97,6 +97,51 @@ class KnowledgeIsolationIT {
         jdbc.update("UPDATE file_meta SET status=5 WHERE file_id=?", FILE);
         assertNull(service.source(1, 101, c.generation(), 0));
     }
+    @Test void semanticIndexRequiresOwnerConsentAndSupportsRevocation() {
+        var first=claim();publish(first,"sample text about encrypted uploads and retries");
+        var gateway=mock(com.cloudchunk.core.knowledge.EmbeddingGateway.class);
+        when(gateway.configured()).thenReturn(true);
+        when(gateway.modelKey()).thenReturn("a".repeat(64));
+        when(gateway.dimensions()).thenReturn(8);
+        when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
+        var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
+            jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
+            new DataSourceTransactionManager(jdbc.getDataSource()));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->semantic.request(1,101,false));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->semantic.request(3,101,true));
+        assertEquals("PENDING",semantic.request(1,101,true).status());
+        semantic.workOne();
+        assertEquals("READY",semantic.status(1,101).status());
+        var hybrid=new com.cloudchunk.core.knowledge.HybridSearchService(
+            service,jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper());
+        var found=hybrid.search(1,"how do uploads work",true);
+        assertEquals("HYBRID_RRF_LIMITED",found.mode());
+        assertEquals("101",found.evidence().getFirst().userFileId());
+        assertTrue(hybrid.search(2,"how do uploads work",true).evidence().isEmpty());
+        jdbc.update("UPDATE user_file SET status=1 WHERE id=101");
+        assertTrue(hybrid.search(1,"how do uploads work",true).evidence().isEmpty());
+        jdbc.update("UPDATE user_file SET status=0 WHERE id=101");
+        assertEquals(1,hybrid.search(1,"how do uploads work",true).evidence().size());
+        semantic.revoke(1,101);
+        assertEquals("NOT_REQUESTED",semantic.status(1,101).status());
+        assertTrue(hybrid.search(1,"how do uploads work",true).evidence().isEmpty());
+    }
+    @Test void deletingDocumentCascadesEmbeddingVectorsAndGrants() {
+        var first=claim();publish(first,"upload retry and processing");
+        var gateway=mock(com.cloudchunk.core.knowledge.EmbeddingGateway.class);
+        when(gateway.configured()).thenReturn(true);
+        when(gateway.modelKey()).thenReturn("b".repeat(64));
+        when(gateway.dimensions()).thenReturn(8);
+        when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
+        var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
+            jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
+            new DataSourceTransactionManager(jdbc.getDataSource()));
+        semantic.request(1,101,true);semantic.workOne();
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_vector",Integer.class));
+        jdbc.update("DELETE FROM knowledge_document WHERE file_id=?",FILE);
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_vector",Integer.class));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_embedding_job",Integer.class));
+    }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
         assertThrows(IllegalStateException.class,this::claim);

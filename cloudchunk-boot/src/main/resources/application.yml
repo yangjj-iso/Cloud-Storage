@@ -164,6 +164,14 @@ cloudchunk:
     batch-size: 500
     max-batches-per-run: 20
   ai:
+    embedding:
+      enabled: ${AI_EMBEDDING_ENABLED:false}
+      endpoint: ${AI_EMBEDDING_ENDPOINT:}
+      model: ${AI_EMBEDDING_MODEL:}
+      api-key: ${AI_EMBEDDING_API_KEY:}
+      dimensions: ${AI_EMBEDDING_DIMENSIONS:384}
+      allow-http: ${AI_EMBEDDING_ALLOW_HTTP:false}
+      job-interval-ms: ${AI_EMBEDDING_JOB_INTERVAL_MS:10000}
     chat:
       # Disabled unless an administrator configures the model; each request needs user consent.
       enabled: ${AI_CHAT_ENABLED:false}
