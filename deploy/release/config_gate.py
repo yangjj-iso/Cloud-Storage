@@ -5,6 +5,7 @@ This is static validation, not proof that credentials, TLS or storage are health
 The production check consumes the fully resolved output of 'docker compose config --format json'.
 """
 import argparse
+import hmac
 import json
 import os
 import pathlib
@@ -80,10 +81,24 @@ def check_env(values, production=False):
         raise GateError("database and object storage must not share credentials")
     if values["MINIO_ROOT_USER"].lower() in ("minioadmin", "root", "admin"):
         raise GateError("MINIO_ROOT_USER must not be a sample account")
+    if len(values.get("METRICS_SCRAPE_TOKEN", "")) < 32 or
+            values.get("METRICS_SCRAPE_TOKEN", "").lower() in BAD_SECRETS:
+        raise GateError("METRICS_SCRAPE_TOKEN is missing or weak")
     if values.get("PROMETHEUS_PUBLIC", "false").lower() != "false":
         raise GateError("PROMETHEUS_PUBLIC must be false")
     if values.get("CROSS_USER_DEDUP_ENABLED", "false").lower() != "false":
         raise GateError("cross-user dedup is not approved for production")
+    token_path = pathlib.Path(values.get("METRICS_TOKEN_FILE", ""))
+    if not token_path.is_absolute() or not token_path.is_file() or token_path.is_symlink():
+        raise GateError("METRICS_TOKEN_FILE must be a regular absolute file")
+    if stat.S_IMODE(token_path.stat().st_mode) & 0o077:
+        raise GateError("metrics token file must not be group/world readable")
+    try:
+        content = token_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise GateError("cannot read metrics token file") from exc
+    if not hmac.compare_digest(content, values["METRICS_SCRAPE_TOKEN"]):
+        raise GateError("metrics token file does not match configured token")
     origins = values["WS_ALLOWED_ORIGINS"].split(",")
     if not origins or any(not is_https_origin(v.strip()) for v in origins):
         raise GateError("WS_ALLOWED_ORIGINS must list explicit HTTPS origins")

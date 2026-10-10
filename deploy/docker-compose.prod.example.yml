@@ -40,6 +40,11 @@ services:
   prometheus:
     image: ${CC_PROMETHEUS_IMAGE:?pin_prometheus_digest}
     ports: !reset []
+    volumes: !override
+      - ./observability/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/rules:/etc/prometheus/rules:ro
+      - ${METRICS_TOKEN_FILE:?provide_private_token_file}:/etc/prometheus/metrics-token:ro
+      - prometheus-data:/prometheus
   grafana:
     image: ${CC_GRAFANA_IMAGE:?pin_grafana_digest}
     ports: !reset []
