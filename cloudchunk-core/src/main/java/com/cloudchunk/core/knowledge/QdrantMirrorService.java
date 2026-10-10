@@ -19,6 +19,10 @@ public class QdrantMirrorService {
     private final ObjectMapper mapper;
     private JsonNode scrollOffset;
 
+    /** Reports only this authenticated user's derived index counts, never global file IDs. */
+    public record MirrorHealth(String state,long readyDocuments,long mirroredDocuments,
+                               long pendingDocuments,boolean qdrantReachable){}
+
     private record Job(long userId,String fileId,long generation,int chunks){}
     private record Row(int chunkIndex,String vectorJson){}
 
@@ -27,6 +31,29 @@ public class QdrantMirrorService {
         this.jdbc=jdbc;this.embedding=embedding;this.store=store;this.mapper=mapper;
     }
     public boolean enabled(){return store.enabled() && embedding.configured();}
+
+    public MirrorHealth healthForUser(long userId) {
+        if(!embedding.configured())return new MirrorHealth("EMBEDDING_DISABLED",0,0,0,false);
+        long[] counters=jdbc.queryForObject("""
+            SELECT COUNT(*),
+              COALESCE(SUM(IF(j.qdrant_synced_at IS NOT NULL AND
+                 j.qdrant_synced_at >= DATE_SUB(NOW(6),INTERVAL 1 DAY),1,0)),0)
+            FROM knowledge_embedding_job j
+            JOIN knowledge_document k ON k.file_id=j.file_id AND k.generation=j.generation
+            JOIN file_meta f ON f.file_id=j.file_id AND f.status=2
+            WHERE j.user_id=? AND j.model_key=? AND j.status='READY'
+              AND k.status IN ('READY','PARTIAL')
+              AND EXISTS (SELECT 1 FROM user_file u WHERE u.file_id=j.file_id
+                AND u.user_id=j.user_id AND u.status=0 AND u.is_dir=0)
+            """,(rs,n)->new long[]{rs.getLong(1),rs.getLong(2)},userId,embedding.modelKey());
+        long total=counters==null?0:counters[0];
+        long synced=counters==null?0:counters[1];
+        if(!store.enabled())return new MirrorHealth("MYSQL_ONLY",total,0,0,false);
+        if(total==0)return new MirrorHealth("NO_INDEX",0,0,0,false);
+        if(synced<total)return new MirrorHealth("SYNCING",total,synced,total-synced,false);
+        boolean reachable=store.collectionAvailable(embedding.modelKey(),embedding.dimensions());
+        return new MirrorHealth(reachable?"READY":"DEGRADED",total,synced,0,reachable);
+    }
 
     /** Require every current, opted-in READY job to be mirrored before fast-path querying. */
     public boolean readyForUser(long userId) {

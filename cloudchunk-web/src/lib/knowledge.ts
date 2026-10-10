@@ -27,6 +27,13 @@ export interface SearchResult { evidence: Evidence[]; hasMore: boolean; mode: 'L
 export interface BlockPage { blocks: Evidence[]; hasMore: boolean; page: number }
 export interface AssistantCapabilities { enabled: boolean; retrievalMode: 'SELECTED_KEYWORD_EVIDENCE' }
 export interface SemanticCapabilities { enabled: boolean; retrievalMode: string }
+export interface VectorHealth {
+  state: 'EMBEDDING_DISABLED' | 'MYSQL_ONLY' | 'NO_INDEX' | 'SYNCING' | 'READY' | 'DEGRADED';
+  readyDocuments: number;
+  mirroredDocuments: number;
+  pendingDocuments: number;
+  qdrantReachable: boolean;
+}
 export interface AiCallCounter { used: number; limit: number; remaining: number }
 export interface AiUsageSnapshot { dayUtc: string; chat: AiCallCounter; embedding: AiCallCounter }
 export interface SemanticIndexStatus { status: 'NOT_REQUESTED' | 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'STALE'; completed: number; total: number }
@@ -74,6 +81,8 @@ export const knowledgeApi = {
   search: (query: string, signal: AbortSignal) => request<SearchResult>('/search', signal, { query }),
   semanticCapabilities: (signal: AbortSignal) =>
     request<SemanticCapabilities>('/semantic/capabilities',signal),
+  semanticHealth: (signal: AbortSignal) =>
+    request<VectorHealth>('/semantic/health', signal),
   semanticSearch: (query: string, consent: boolean, signal: AbortSignal) =>
     request<SearchResult>('/semantic/search', signal, { query, consent }),
   semanticIndex: (id: string, consent: boolean, signal: AbortSignal) =>

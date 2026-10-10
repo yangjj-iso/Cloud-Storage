@@ -103,3 +103,12 @@
 .kw-usage-stats strong { color:var(--kw-ink); }
 .kw-usage-hint { display:block; margin-top:8px; font-size:12px; color:var(--kw-muted); }
 .kw-usage p { margin:8px 0 0; font-size:11px; line-height:1.6; color:var(--kw-muted); }
+
+.kw-vector-health { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:11px 14px; margin-top:12px; border-radius:11px; font-size:12px;
+  color:#416d61; background:#fff9; border:1px solid #d9e8e0; }
+.kw-vector-health > .material-symbols-outlined { font-size:18px; }
+.kw-vector-progress { color:var(--kw-muted); font-size:11px; }
+.kw-vector-health button { margin-left:auto; display:flex; padding:5px; border-radius:7px; }
+.kw-vector-health button:hover { background:#eaf2ed; }
+.kw-vector-health button .material-symbols-outlined { font-size:17px; }

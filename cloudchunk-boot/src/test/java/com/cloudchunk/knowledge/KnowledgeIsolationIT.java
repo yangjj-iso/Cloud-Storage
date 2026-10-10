@@ -194,19 +194,32 @@ class KnowledgeIsolationIT {
             mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
         semantic.request(1,101,true);semantic.workOne();
         var store=mock(com.cloudchunk.core.knowledge.QdrantVectorStore.class);
-        when(store.enabled()).thenReturn(true);
         var mirror=new com.cloudchunk.core.knowledge.QdrantMirrorService(
             jdbc,gateway,store,new com.fasterxml.jackson.databind.ObjectMapper());
+        assertEquals("MYSQL_ONLY",mirror.healthForUser(1).state());
+        assertEquals(0,mirror.healthForUser(1).pendingDocuments());
+        when(store.enabled()).thenReturn(true);
         assertFalse(mirror.readyForUser(1));
+        assertEquals("SYNCING",mirror.healthForUser(1).state());
         mirror.syncOne();
         verify(store).upsert(eq(modelKey),eq(8),argThat(points->
             points.size()==1 && points.getFirst().userId()==1 &&
             points.getFirst().fileId().equals(FILE)));
         assertTrue(mirror.readyForUser(1));
+        when(store.collectionAvailable(modelKey,8)).thenReturn(true);
+        var ownHealth=mirror.healthForUser(1);
+        assertEquals("READY",ownHealth.state());
+        assertEquals(1,ownHealth.readyDocuments());
+        assertEquals(1,ownHealth.mirroredDocuments());
+        assertEquals(0,ownHealth.pendingDocuments());
+        assertEquals("NO_INDEX",mirror.healthForUser(2).state());
+        when(store.collectionAvailable(modelKey,8)).thenReturn(false);
+        assertEquals("DEGRADED",mirror.healthForUser(1).state());
         assertFalse(mirror.readyForUser(2),"unconsented second owner is never mirrored");
         String pointId=com.cloudchunk.core.knowledge.QdrantVectorStore
             .pointId(1L,FILE,first.generation(),0,modelKey);
         semantic.revoke(1,101);
+        assertEquals("NO_INDEX",mirror.healthForUser(1).state());
         assertFalse(mirror.readyForUser(1));
         when(store.scroll(eq(modelKey),isNull(),eq(40)))
             .thenReturn(new com.cloudchunk.core.knowledge.QdrantVectorStore.Page(
