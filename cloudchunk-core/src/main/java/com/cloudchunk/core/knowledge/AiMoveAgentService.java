@@ -39,6 +39,11 @@ public class AiMoveAgentService {
     public record Proposal(String id,String userFileId,String fileName,long sourceParentId,
                            long destinationId,String destinationName,String expiresAt,String status) {}
     public record ApplyResult(String proposalId,String userFileId,long destinationId,String status) {}
+    public record UndoRequest(boolean confirmed) {}
+    public record UndoResult(String proposalId,String userFileId,long restoredParentId,String status) {}
+    public record BatchSuggestRequest(List<SourceRef> sources,List<Long> candidateFolderIds,boolean consent) {}
+    public record BatchItem(SourceRef source,Proposal proposal,String status) {}
+    public record BatchPreview(List<BatchItem> items,int proposed,int skipped) {}
 
     private record FileSnapshot(String name,long parentId,LocalDateTime updatedAt) {}
     private record Folder(long id,String name,long parentId,LocalDateTime updatedAt) {}
@@ -85,6 +90,45 @@ public class AiMoveAgentService {
         return new FolderChoices(folders.stream().limit(100)
             .map(f->new FolderOption(f.id(),f.name(),f.parentId())).toList(),
             folders.size()>100);
+    }
+    /**
+     * Bounded multi-file preview. Each item remains a separate immutable proposal.
+     * A failure on one file does not authorize or execute any other file.
+     * Apply/undo ALWAYS needs a new explicit user action per proposal.
+     */
+    public BatchPreview batchSuggest(long userId,BatchSuggestRequest request) {
+        if(!capabilities().enabled())throw BizException.of(ErrorCode.AI_DISABLED);
+        if(request==null || !request.consent() || request.sources()==null ||
+           request.sources().isEmpty() || request.sources().size()>4 ||
+           request.sources().stream().anyMatch(java.util.Objects::isNull) ||
+           request.candidateFolderIds()==null || request.candidateFolderIds().isEmpty() ||
+           request.candidateFolderIds().size()>12 ||
+           request.candidateFolderIds().stream().anyMatch(id->id==null || id<=0) ||
+           new java.util.HashSet<>(request.candidateFolderIds()).size()!=request.candidateFolderIds().size())
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,
+                "请明确授权、选择1到4个不同文件和最多12个候选目录");
+        java.util.Set<String> uniqueFiles=new java.util.HashSet<>();
+        for(SourceRef ref:request.sources()) {
+            if(ref.userFileId()==null || !ref.userFileId().matches("[1-9][0-9]{0,18}") ||
+               ref.generation()<1 || ref.chunkIndex()<0 ||
+               !uniqueFiles.add(ref.userFileId()))
+                throw BizException.of(ErrorCode.INVALID_PARAMETER,"每份文件只能选择一个有效来源片段");
+        }
+        List<BatchItem> items=new ArrayList<>();
+        int proposed=0;
+        for(SourceRef source:request.sources()) {
+            try {
+                Proposal proposal=suggest(userId,new SuggestRequest(
+                    source,true,request.candidateFolderIds()));
+                items.add(new BatchItem(source,proposal,"READY"));
+                proposed++;
+            } catch(BizException rejected) {
+                // Never echo model input or upstream details. All successful previews stay
+                // unapplied until separately confirmed.
+                items.add(new BatchItem(source,null,"SKIPPED"));
+            }
+        }
+        return new BatchPreview(List.copyOf(items),proposed,items.size()-proposed);
     }
     public Proposal suggest(long userId,SuggestRequest request) {
         if(!capabilities().enabled())throw BizException.of(ErrorCode.AI_DISABLED);
@@ -194,11 +238,70 @@ public class AiMoveAgentService {
                 "目标文件夹已有同名条目，已取消本次移动");
         drive.move(p.userFileId(),userId,p.destinationId());
         jdbc.update("""
-            UPDATE ai_move_proposal SET status='APPLIED',applied_at=NOW(3)
+            UPDATE ai_move_proposal SET status='APPLIED',applied_at=NOW(3),
+              applied_file_updated_at=(SELECT updated_at FROM user_file WHERE id=? AND user_id=?)
             WHERE id=? AND user_id=? AND status='PENDING'
-            """,proposalId,userId);
+            """,p.userFileId(),userId,proposalId,userId);
         return new ApplyResult(proposalId,Long.toString(p.userFileId()),p.destinationId(),"APPLIED");
     }
+
+    /**
+     * Reversible only for a short interval, only if source file and both destination/origin
+     * permissions are still valid, and no other mutation happened since the approved move.
+     * This is never an autonomous model tool and never overrides a newer user action.
+     */
+    @Transactional
+    public UndoResult undo(long userId,String proposalId,UndoRequest request) {
+        if(request==null || !request.confirmed() || proposalId==null ||
+           !proposalId.matches("[a-f0-9-]{36}"))
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,"撤销移动需要明确确认");
+        List<UndoSnapshot> found=jdbc.query("""
+            SELECT user_file_id,generation,chunk_index,original_name,source_parent_id,
+              destination_id,applied_at,applied_file_updated_at,status
+            FROM ai_move_proposal WHERE id=? AND user_id=? FOR UPDATE
+            """,(rs,n)->new UndoSnapshot(rs.getLong(1),rs.getLong(2),rs.getInt(3),
+                rs.getString(4),rs.getLong(5),rs.getLong(6),
+                rs.getTimestamp(7)==null?null:rs.getTimestamp(7).toLocalDateTime(),
+                rs.getTimestamp(8)==null?null:rs.getTimestamp(8).toLocalDateTime(),
+                rs.getString(9)),proposalId,userId);
+        if(found.isEmpty())throw BizException.of(ErrorCode.FILE_NOT_FOUND);
+        UndoSnapshot p=found.getFirst();
+        if(!"APPLIED".equals(p.state()) || p.appliedAt()==null ||
+           p.appliedFileUpdatedAt()==null ||
+           !p.appliedAt().plusMinutes(15).isAfter(LocalDateTime.now()))
+            throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
+        List<FileSnapshot> source=jdbc.query("""
+            SELECT u.file_name,u.parent_id,u.updated_at FROM user_file u
+            JOIN file_meta f ON f.file_id=u.file_id AND f.status=2
+            JOIN knowledge_document k ON k.file_id=u.file_id AND k.generation=?
+              AND k.status IN ('READY','PARTIAL')
+            WHERE u.id=? AND u.user_id=? AND u.status=0 AND u.is_dir=0 FOR UPDATE
+            """,(rs,n)->new FileSnapshot(rs.getString(1),rs.getLong(2),
+                 rs.getTimestamp(3).toLocalDateTime()),p.generation(),p.userFileId(),userId);
+        if(source.isEmpty() || !source.getFirst().name().equals(p.name()) ||
+           source.getFirst().parentId()!=p.destinationId() ||
+           !source.getFirst().updatedAt().equals(p.appliedFileUpdatedAt()) ||
+           knowledge.source(userId,p.userFileId(),p.generation(),p.chunkIndex())==null)
+            throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
+        if(p.originalParentId()!=0) {
+            // Origin must remain an active owned directory. Lock it before proceeding.
+            List<Long> origin=jdbc.query("""
+                SELECT id FROM user_file WHERE id=? AND user_id=? AND status=0 AND is_dir=1 FOR UPDATE
+                """,(rs,n)->rs.getLong(1),p.originalParentId(),userId);
+            if(origin.isEmpty())throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
+        }
+        if(hasSiblingConflict(userId,p.originalParentId(),p.name(),p.userFileId()))
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,"原位置已有同名文件，无法撤销");
+        drive.move(p.userFileId(),userId,p.originalParentId());
+        jdbc.update("""
+            UPDATE ai_move_proposal SET status='REVERTED',reverted_at=NOW(3)
+            WHERE id=? AND user_id=? AND status='APPLIED'
+            """,proposalId,userId);
+        return new UndoResult(proposalId,Long.toString(p.userFileId()),p.originalParentId(),"REVERTED");
+    }
+    private record UndoSnapshot(long userFileId,long generation,int chunkIndex,String name,
+                                long originalParentId,long destinationId,LocalDateTime appliedAt,
+                                LocalDateTime appliedFileUpdatedAt,String state) {}
 
     public List<Proposal> recent(long userId) {
         return jdbc.query("""
