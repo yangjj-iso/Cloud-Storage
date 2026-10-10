@@ -169,6 +169,9 @@ export function KnowledgeWorkspace() {
               KEYWORD_FALLBACK: 'Embedding 服务暂不可用，已明确降级为关键词结果。',
               SEMANTIC_DISABLED: '语义能力未开启，当前仅使用关键词结果。',
               LITERAL_KEYWORD: '精确关键词检索：仅匹配片段中的字面文字。',
+              QDRANT_HYBRID_RRF_LIMITED: 'Qdrant 向量候选与关键词融合，已按当前文件权限重新校验。',
+              QDRANT_WARMING: 'Qdrant 镜像补齐中，当前使用 MySQL 混合检索。',
+              QDRANT_FALLBACK: 'Qdrant 暂不可用或未命中，已退回 MySQL 混合检索。',
             }[results.mode]}</p>}
             {results && results.evidence.length === 0 && <div className="kw-empty"><MaterialIcon>manage_search</MaterialIcon><h4>没有找到匹配的已索引片段</h4><p>试试文档中的精确短语。未索引、解析失败和未提取到的部分不在搜索范围内。</p></div>}
             {results && results.evidence.length > 0 && <div className="kw-results">

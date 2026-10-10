@@ -153,6 +153,7 @@ npm run dev
 - [混合检索 M2.2](./docs/13-ai-hybrid-retrieval.md)：用户授权的 Embedding 索引、混合排序与当前限制。
 - [AI 一步问答](./docs/14-ai-one-step-ask.md)：明确授权后自动检索少量来源并生成引用回答。
 - [AI 每日调用预算](./docs/15-ai-daily-call-budget.md)：按 UTC 日和用户对模型请求实施数据库原子配额、用量看板与后台延期重试。
+- [Qdrant 向量镜像](./docs/16-qdrant-vector-mirror.md)：可选加速、异步同步、权限复核与故障回退。
 
 ## 验证
 
