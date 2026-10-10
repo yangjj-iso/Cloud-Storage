@@ -46,14 +46,28 @@ public class OperationAuditFilter extends OncePerRequestFilter {
             completed = true;
         } finally {
             long costMs = (System.nanoTime() - started) / 1_000_000L;
-            String area = area(request.getRequestURI());
-            String opType = area + "_" + request.getMethod().toUpperCase(Locale.ROOT);
+            String opType = operation(request.getRequestURI(),request.getMethod());
             boolean success = completed && response.getStatus() < 400;
-            auditService.record(UserContext.get(), opType, request.getRequestURI(),
+            // No request path, file IDs or filenames in audit rows. Operation names are fixed.
+            auditService.record(UserContext.get(), opType, null,
                     request.getRemoteAddr(), request.getHeader("User-Agent"), success, costMs);
         }
     }
 
+    static String operation(String path,String method) {
+        if(path==null)return "API_OTHER";
+        if(path.equals("/api/v1/drive/mkdir"))return "DRIVE_MKDIR";
+        if(path.equals("/api/v1/drive/rename"))return "DRIVE_RENAME";
+        if(path.equals("/api/v1/drive/move"))return "DRIVE_MOVE";
+        if(path.matches("/api/v1/drive/[0-9]+") && "DELETE".equalsIgnoreCase(method))
+            return "DRIVE_RECYCLE";
+        if(path.matches("/api/v1/recycle/[0-9]+/restore"))return "DRIVE_RESTORE";
+        if(path.matches("/api/v1/recycle/[0-9]+") && "DELETE".equalsIgnoreCase(method))
+            return "DRIVE_PURGE";
+        String remainder=path.startsWith("/api/v1/")?path.substring("/api/v1/".length()):"API";
+        String area=remainder.split("/")[0].replaceAll("[^A-Za-z0-9]","").toUpperCase(Locale.ROOT);
+        return (area.isBlank()?"API":area)+"_"+method.toUpperCase(Locale.ROOT);
+    }
     private String area(String path) {
         if (path == null) return "API";
         String remainder = path.substring(Math.min(path.length(), "/api/v1/".length()));

@@ -112,6 +112,7 @@ const apiMessages: Record<number, string> = {
   300001: '文件不存在',
   300002: '文件已损坏',
   300003: '下载范围无效',
+  300004: '此目录已有同名文件或文件夹，请改名或选择其他位置',
   400001: '转码记录不存在',
   400002: '文件正在转码中',
   500001: '存储服务暂不可用',
@@ -364,6 +365,10 @@ export const api = {
   },
 
   // ===== Drive (directory tree) =====
+  driveAudit: async (): Promise<Array<{operation:string;success:boolean;costMs:number;at:string}>> => {
+    const res=await fetch(`${API_BASE}/drive/audit`,{headers:authHeaders(),cache:'no-store'});
+    return parse(res);
+  },
   driveList: async (parentId = 0): Promise<UserFileItem[]> => {
     const res = await fetch(`${API_BASE}/drive/list?parentId=${parentId}`, { headers: authHeaders() });
     return parse<UserFileItem[]>(res);
