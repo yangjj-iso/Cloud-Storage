@@ -84,6 +84,19 @@ class KnowledgeIsolationIT {
         index.cleanDeleted();
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_document", Integer.class));
     }
+    @Test void exactCitationLookupChecksCurrentOwnerVersionAndFileStatus() {
+        var c = claim(); publish(c, "private citation text");
+        assertNotNull(service.source(1, 101, c.generation(), 0));
+        assertNull(service.source(2, 101, c.generation(), 0));
+        assertNull(service.source(1, 102, c.generation(), 0));
+        assertNull(service.source(1, 101, c.generation() + 1, 0));
+        jdbc.update("UPDATE user_file SET status=1 WHERE id=101");
+        assertNull(service.source(1, 101, c.generation(), 0));
+        jdbc.update("UPDATE user_file SET status=0 WHERE id=101");
+        assertNotNull(service.source(1, 101, c.generation(), 0));
+        jdbc.update("UPDATE file_meta SET status=5 WHERE file_id=?", FILE);
+        assertNull(service.source(1, 101, c.generation(), 0));
+    }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
         assertThrows(IllegalStateException.class,this::claim);
