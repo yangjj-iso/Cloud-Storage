@@ -59,6 +59,21 @@ class GroundedAnswerServiceTest {
         assertEquals("MODEL_WITH_CITATIONS",answer.mode());
         assertEquals("S1",answer.citations().getFirst().citationId());
     }
+    @Test void exhaustedChatBudgetNeverCallsTheModel() {
+        var knowledge=mock(KnowledgeService.class);
+        var gateway=mock(ChatGateway.class);
+        var budget=mock(AiDailyCallBudget.class);
+        var env=mock(Environment.class);
+        when(env.getProperty("cloudchunk.ai.chat.enabled","false")).thenReturn("true");
+        when(gateway.configured()).thenReturn(true);
+        when(knowledge.source(7L,101L,3L,0)).thenReturn(E);
+        doThrow(BizException.of(ErrorCode.AI_BUDGET_EXHAUSTED))
+            .when(budget).reserve(7L,AiDailyCallBudget.Kind.CHAT);
+        var service=new GroundedAnswerService(knowledge,gateway,env,budget);
+        assertEquals(ErrorCode.AI_BUDGET_EXHAUSTED,assertThrows(BizException.class,
+            () -> service.answer(7,request(true))).getErrorCode());
+        verify(gateway,never()).complete(anyString(),anyList());
+    }
     @Test void reauthorizationAfterInferenceDetectsRevocation() {
         var knowledge=mock(KnowledgeService.class);var gateway=mock(ChatGateway.class);
         when(gateway.configured()).thenReturn(true);

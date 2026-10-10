@@ -47,6 +47,14 @@ class AutoAnswerServiceTest {
         assertTrue(captured.getValue().consent());
     }
 
+    @Test void exhaustedChatBudgetDoesNotSpendEmbeddingQuota() {
+        when(answer.capabilities()).thenReturn(new AssistantCapabilities(true,"SELECTED_KEYWORD_EVIDENCE"));
+        doThrow(BizException.of(ErrorCode.AI_BUDGET_EXHAUSTED))
+            .when(budget).ensureChatAvailable(7L);
+        assertEquals(ErrorCode.AI_BUDGET_EXHAUSTED,assertThrows(BizException.class,
+            () -> auto.ask(7,new AutoAskRequest("如何保证完整性",true))).getErrorCode());
+        verifyNoInteractions(search);
+    }
     @Test void noEvidenceReturnsInsufficientWithoutCallingModel() {
         when(answer.capabilities()).thenReturn(new AssistantCapabilities(true,"SELECTED_KEYWORD_EVIDENCE"));
         when(search.search(7,"如何保证完整性",true)).thenReturn(

@@ -4,6 +4,7 @@ import { knowledgeApi, statusLabels, type AnswerResponse, type AssistantCapabili
 import { MaterialIcon } from './ui/MaterialIcon';
 import './knowledge-workspace.css';
 import { DirectAskPanel } from './DirectAskPanel';
+import { AiUsageBar } from './AiUsageBar';
 
 type Selection = { userFileId: string; fileName: string; generation: number; chunkIndex?: number };
 
@@ -148,6 +149,7 @@ export function KnowledgeWorkspace() {
           <span>仅同意将本次查询发送到已配置的 Embedding 模型服务，查询后自动清除授权。</span>
         </label>}
         <div className="kw-hints"><span><MaterialIcon>lock</MaterialIcon>搜索结果与证据始终按当前文件权限读取</span><span>语义索引由用户对单份文件主动开启</span></div>
+        <AiUsageBar />
       </div>
       <div className={`kw-layout ${selection ? 'kw-with-evidence' : ''}`}>
         <div className="kw-main">
