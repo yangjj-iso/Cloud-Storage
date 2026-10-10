@@ -167,6 +167,7 @@ cloudchunk:
     agent:
       # M2.8 starts with human-approved rename only; no autonomous file writes.
       rename-enabled: ${AI_AGENT_RENAME_ENABLED:false}
+      move-enabled: ${AI_AGENT_MOVE_ENABLED:false}
     qdrant:
       enabled: ${AI_QDRANT_ENABLED:false}
       url: ${AI_QDRANT_URL:}
