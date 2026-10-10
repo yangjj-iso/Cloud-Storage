@@ -45,11 +45,12 @@ public class KnowledgeIndexStore {
                 (rs, n) -> rs.getString(1), claim.fileId());
         if (tokens.isEmpty() || !claim.token().equals(tokens.getFirst())) return;
         // Authoritative availability is checked again before publishing any derived content.
-        Integer active = jdbc.queryForObject("""
+        Integer retained = jdbc.queryForObject("""
             SELECT COUNT(*) FROM file_meta f WHERE f.file_id=? AND f.status=2
-            AND EXISTS (SELECT 1 FROM user_file u WHERE u.file_id=f.file_id AND u.status=0)
+            AND EXISTS (SELECT 1 FROM user_file u WHERE u.file_id=f.file_id AND u.status IN (0,1))
             """, Integer.class, claim.fileId());
-        if (active == null || active == 0) {
+        // Recycled references still own their data: reads are blocked until restoration.
+        if (retained == null || retained == 0) {
             jdbc.update("DELETE FROM knowledge_document WHERE file_id=?", claim.fileId());
             return;
         }
@@ -93,7 +94,9 @@ public class KnowledgeIndexStore {
         // Bound each run. Recycled files retain their index for restore, but every read rejects them.
         List<String> ids = jdbc.query("""
             SELECT k.file_id FROM knowledge_document k LEFT JOIN file_meta f ON f.file_id=k.file_id
-            WHERE f.file_id IS NULL OR f.status IN (4,5) LIMIT 100
+            WHERE f.file_id IS NULL OR f.status IN (4,5)
+              OR NOT EXISTS (SELECT 1 FROM user_file u WHERE u.file_id=k.file_id AND u.status IN (0,1))
+            LIMIT 100
             """, (rs, n) -> rs.getString(1));
         for (String id : ids) jdbc.update("DELETE FROM knowledge_document WHERE file_id=?", id);
     }

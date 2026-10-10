@@ -4,7 +4,20 @@ import { knowledgeApi, statusLabels, type BlockPage, type KnowledgeDocument,
 import { MaterialIcon } from './ui/MaterialIcon';
 import './knowledge-workspace.css';
 
-type Selection = { userFileId: string; fileName: string; generation: number };
+type Selection = { userFileId: string; fileName: string; generation: number; chunkIndex?: number };
+
+function excerpt(content: string, query: string): string {
+  const match = content.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  if (match < 0) return content.slice(0, 200);
+  const start = Math.max(0, match - 75);
+  const end = Math.min(content.length, match + query.length + 115);
+  return `${start > 0 ? '…' : ''}${content.slice(start, end)}${end < content.length ? '…' : ''}`;
+}
+function HighlightMatch({ text, query }: { text: string; query: string }) {
+  const at = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  if (at < 0) return <>{text}</>;
+  return <>{text.slice(0, at)}<mark className="kw-match">{text.slice(at, at + query.length)}</mark>{text.slice(at + query.length)}</>;
+}
 const readable = (d: KnowledgeDocument) => d.status === 'READY' || d.status === 'PARTIAL';
 const errorMessage = (e: unknown) => e instanceof Error ? e.message : '请求失败，请重试';
 
@@ -118,7 +131,7 @@ export function KnowledgeWorkspace() {
             {results && results.evidence.length > 0 && <div className="kw-results">
               {results.evidence.map(hit => <button className="kw-hit" key={`${hit.userFileId}-${hit.generation}-${hit.chunkIndex}`} onClick={() => setSelection(hit)}>
                 <span className="kw-hit-title"><MaterialIcon>description</MaterialIcon>{hit.fileName}<MaterialIcon>north_east</MaterialIcon></span>
-                <span className="kw-hit-content">{hit.content}</span>
+                <span className="kw-hit-content"><HighlightMatch text={excerpt(hit.content, searched)} query={searched} /></span>
                 <span className="kw-hit-meta">解析版本 {hit.generation} · 片段 {hit.chunkIndex + 1}{hit.status === 'PARTIAL' ? ' · 文档仅部分可检索' : ''}</span>
               </button>)}
               {results.hasMore && <p className="kw-footnote">当前显示前 20 个匹配片段，还有更多结果。请使用更具体的关键词；此结果不代表全量统计。</p>}
@@ -143,14 +156,14 @@ export function KnowledgeWorkspace() {
           </>}
           <div className="kw-boundary"><MaterialIcon>info</MaterialIcon><p>当前提供文档正文索引，不生成摘要或答案。每份文件上限 20 MB，最多提取 262144 字符；扫描件 OCR、图片和内嵌附件不在本阶段范围内。</p></div>
         </div>
-        {selection && <EvidencePanel key={`${selection.userFileId}-${selection.generation}`} selection={selection} onClose={() => { setSelection(null); searchInput.current?.focus(); }} />}
+        {selection && <EvidencePanel key={`${selection.userFileId}-${selection.generation}-${selection.chunkIndex ?? "start"}`} selection={selection} onClose={() => { setSelection(null); searchInput.current?.focus(); }} />}
       </div>
     </section>
   );
 }
 
 function EvidencePanel({ selection, onClose }: { selection: Selection; onClose: () => void }) {
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(Math.floor((selection.chunkIndex ?? 0) / 20) + 1);
   const [data, setData] = useState<BlockPage | null>(null);
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
@@ -173,7 +186,7 @@ function EvidencePanel({ selection, onClose }: { selection: Selection; onClose: 
     {error && <div className="kw-error" role="alert">{error}<button className="kw-button" onClick={() => setRefresh(v => v + 1)}>重试</button></div>}
     {!data && !error && <p role="status">正在重新校验权限并读取正文…</p>}
     {data?.blocks.length === 0 && <p className="kw-footnote">当前版本没有可显示片段。资料可能已重新处理，请刷新资料列表；这不表示原文件没有内容。</p>}
-    {data?.blocks.map(block => <section className="kw-block" key={block.chunkIndex}><h4>片段 {block.chunkIndex + 1}<span>字符 {block.startOffset}–{block.endOffset}</span></h4><p>{block.content}</p></section>)}
+    {data?.blocks.map(block => <section className={`kw-block ${block.chunkIndex === selection.chunkIndex ? "kw-block-selected" : ""}`} key={block.chunkIndex}><h4>片段 {block.chunkIndex + 1}<span>字符 {block.startOffset}–{block.endOffset}</span></h4><p>{block.content}</p></section>)}
     <div className="kw-pagination"><button className="kw-button" disabled={page <= 1 || !data} onClick={() => setPage(p => p - 1)}>上一页</button><button className="kw-button" disabled={!data?.hasMore} onClick={() => setPage(p => p + 1)}>下一页</button></div>
   </aside>;
 }
