@@ -29,7 +29,11 @@ public enum ErrorCode {
     STORAGE_UNAVAILABLE(500001, 500, "storage unavailable"),
     STORAGE_INSUFFICIENT(500002, 507, "storage insufficient"),
 
-    QUOTA_EXCEEDED(600001, 403, "user quota exceeded");
+    QUOTA_EXCEEDED(600001, 403, "user quota exceeded"),
+    AI_DISABLED(700001, 503, "AI chat not configured"),
+    AI_SOURCE_CHANGED(700002, 409, "AI evidence no longer accessible"),
+    AI_PROVIDER_UNAVAILABLE(700003, 503, "AI model unavailable"),
+    AI_UNGROUNDED(700004, 422, "AI answer has no valid citations");
 
     private final int code;
     private final int httpStatus;

@@ -163,6 +163,14 @@ cloudchunk:
     operation-log: ${RETENTION_OPERATION_LOG:P90D}
     batch-size: 500
     max-batches-per-run: 20
+  ai:
+    chat:
+      # Disabled unless an administrator configures the model; each request needs user consent.
+      enabled: ${AI_CHAT_ENABLED:false}
+      endpoint: ${AI_CHAT_ENDPOINT:}
+      model: ${AI_CHAT_MODEL:}
+      api-key: ${AI_CHAT_API_KEY:}
+      allow-http: ${AI_CHAT_ALLOW_HTTP:false}
   transcode:
     ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
     video-task-timeout: PT30M

@@ -25,6 +25,13 @@ export interface Evidence {
 export interface Library { documents: KnowledgeDocument[]; hasMore: boolean; page: number }
 export interface SearchResult { evidence: Evidence[]; hasMore: boolean; mode: 'LITERAL_KEYWORD' }
 export interface BlockPage { blocks: Evidence[]; hasMore: boolean; page: number }
+export interface AssistantCapabilities { enabled: boolean; retrievalMode: 'SELECTED_KEYWORD_EVIDENCE' }
+export interface SourceRef { userFileId: string; generation: number; chunkIndex: number }
+export interface AnswerResponse {
+  answer: string;
+  citations: { citationId: string; evidence: Evidence }[];
+  mode: 'MODEL_WITH_CITATIONS' | 'INSUFFICIENT_EVIDENCE';
+}
 
 async function request<T>(path: string, signal: AbortSignal, body?: unknown): Promise<T> {
   const response = await fetch(`/api/v1/knowledge${path}`, {
@@ -41,8 +48,14 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown): Pr
     throw new ApiError(100002, '登录状态已失效，请重新登录');
   }
   if (!response.ok || !result || result.code !== 0) {
+    const aiMessages: Record<number, string> = {
+      700001: '模型问答尚未配置或未启用',
+      700002: '引用来源已经变更或权限已失效，请重新检索',
+      700003: '模型服务暂不可用，请稍后重试',
+      700004: '模型没有返回有效的引用编号，已拒绝展示答案',
+    };
     throw new ApiError(result?.code ?? response.status,
-      result?.message || '资料服务暂不可用，请确认后端已升级并稍后重试', result?.traceId);
+      aiMessages[result?.code ?? 0] || result?.message || '资料服务暂不可用，请确认后端已升级并稍后重试', result?.traceId);
   }
   return result.data;
 }
@@ -50,6 +63,10 @@ export const knowledgeApi = {
   library: (page: number, signal: AbortSignal) => request<Library>(`/documents?page=${page}`, signal),
   search: (query: string, signal: AbortSignal) => request<SearchResult>('/search', signal, { query }),
   index: (id: string, signal: AbortSignal) => request<void>(`/documents/${encodeURIComponent(id)}/index`, signal, {}),
+  assistantCapabilities: (signal: AbortSignal) =>
+    request<AssistantCapabilities>('/assistant/capabilities', signal),
+  answer: (question: string, sources: SourceRef[], consent: boolean, signal: AbortSignal) =>
+    request<AnswerResponse>('/assistant/answer', signal, { question, sources, consent }),
   blocks: (id: string, generation: number, page: number, signal: AbortSignal) =>
     request<BlockPage>(`/documents/${encodeURIComponent(id)}/blocks?generation=${generation}&page=${page}`, signal),
 };

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { knowledgeApi, statusLabels, type BlockPage, type KnowledgeDocument,
-  type Library, type SearchResult } from '../lib/knowledge';
+import { knowledgeApi, statusLabels, type AnswerResponse, type AssistantCapabilities, type BlockPage, type Evidence,
+  type KnowledgeDocument, type Library, type SearchResult, type SourceRef } from '../lib/knowledge';
 import { MaterialIcon } from './ui/MaterialIcon';
 import './knowledge-workspace.css';
 
@@ -104,9 +104,9 @@ export function KnowledgeWorkspace() {
   return (
     <section className="kw" aria-label="资料工作台">
       <div className="kw-intro">
-        <div className="kw-eyebrow"><MaterialIcon>auto_stories</MaterialIcon>内容理解 · 第一阶段</div>
+        <div className="kw-eyebrow"><MaterialIcon>auto_stories</MaterialIcon>资料工作台 · 证据与问答</div>
         <h2>从文件中，找到依据。</h2>
-        <p>检索文档正文，查看来源片段。资料仅在当前部署中处理，不发送到外部模型。</p>
+        <p>检索正文、核对原文。需要时选择证据并明确授权，由可选模型整理带引用的回答。</p>
         <form className="kw-search" onSubmit={search}>
           <MaterialIcon>search</MaterialIcon>
           <label className="sr-only" htmlFor="knowledge-query">搜索已解析文档的正文关键词</label>
@@ -114,7 +114,7 @@ export function KnowledgeWorkspace() {
             maxLength={100} placeholder="输入正文中的关键词，例如：断点续传" autoComplete="off" />
           <button type="submit" disabled={searching || query.trim().length < 2}>{searching ? '检索中…' : '检索正文'}<MaterialIcon>arrow_forward</MaterialIcon></button>
         </form>
-        <div className="kw-hints"><span><MaterialIcon>lock</MaterialIcon>仅检索你当前可访问的文件</span><span>关键词匹配 · 非语义搜索或 AI 回答</span></div>
+        <div className="kw-hints"><span><MaterialIcon>lock</MaterialIcon>仅检索你当前可访问的文件</span><span>关键词匹配 · AI 问答默认关闭</span></div>
       </div>
       <div className={`kw-layout ${selection ? 'kw-with-evidence' : ''}`}>
         <div className="kw-main">
@@ -136,6 +136,7 @@ export function KnowledgeWorkspace() {
               </button>)}
               {results.hasMore && <p className="kw-footnote">当前显示前 20 个匹配片段，还有更多结果。请使用更具体的关键词；此结果不代表全量统计。</p>}
             </div>}
+            {results && results.evidence.length > 0 && <AssistantPanel key={searched} results={results} onSourceOpen={setSelection} />}
           </> : <>
             {loading ? <div className="kw-empty" role="status">正在加载资料…</div> : library && library.documents.length === 0 ?
               <div className="kw-empty"><MaterialIcon>library_books</MaterialIcon><h4>{page === 1 ? '从第一份文档开始' : '这一页暂无资料'}</h4><p>{page === 1 ? '上传支持的文档后会自动解析。已有文档可点击“建立索引”；文件必须先完成完整性校验。' : '资料可能已移动或删除，请返回上一页。'}</p></div> :
@@ -154,7 +155,7 @@ export function KnowledgeWorkspace() {
               <button className="kw-button" disabled={!library?.hasMore || loading} onClick={() => { setPage(p => p + 1); setSelection(null); }}>下一页</button>
             </div></div>
           </>}
-          <div className="kw-boundary"><MaterialIcon>info</MaterialIcon><p>当前提供文档正文索引，不生成摘要或答案。每份文件上限 20 MB，最多提取 262144 字符；扫描件 OCR、图片和内嵌附件不在本阶段范围内。</p></div>
+          <div className="kw-boundary"><MaterialIcon>info</MaterialIcon><p>每份文件上限 20 MB，最多提取 262144 字符；扫描件 OCR、图片和附件仍不在本阶段范围内。可选模型问答需要单次用户授权；引用编号不代表事实已自动核实。</p></div>
         </div>
         {selection && <EvidencePanel key={`${selection.userFileId}-${selection.generation}-${selection.chunkIndex ?? "start"}`} selection={selection} onClose={() => { setSelection(null); searchInput.current?.focus(); }} />}
       </div>
@@ -189,4 +190,100 @@ function EvidencePanel({ selection, onClose }: { selection: Selection; onClose: 
     {data?.blocks.map(block => <section className={`kw-block ${block.chunkIndex === selection.chunkIndex ? "kw-block-selected" : ""}`} key={block.chunkIndex}><h4>片段 {block.chunkIndex + 1}<span>字符 {block.startOffset}–{block.endOffset}</span></h4><p>{block.content}</p></section>)}
     <div className="kw-pagination"><button className="kw-button" disabled={page <= 1 || !data} onClick={() => setPage(p => p - 1)}>上一页</button><button className="kw-button" disabled={!data?.hasMore} onClick={() => setPage(p => p + 1)}>下一页</button></div>
   </aside>;
+}
+
+
+/** Optional Q&A scoped only to the evidence the user explicitly selects. */
+function AssistantPanel({ results, onSourceOpen }: { results: SearchResult; onSourceOpen: (source: Evidence) => void }) {
+  const [capabilities, setCapabilities] = useState<AssistantCapabilities | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [question, setQuestion] = useState('');
+  const [consent, setConsent] = useState(false);
+  const [answer, setAnswer] = useState<AnswerResponse | null>(null);
+  const [error, setError] = useState('');
+  const [running, setRunning] = useState(false);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void knowledgeApi.assistantCapabilities(controller.signal)
+      .then(data => { if (!controller.signal.aborted) setCapabilities(data); })
+      .catch(() => { if (!controller.signal.aborted) setCapabilities({ enabled: false, retrievalMode: 'SELECTED_KEYWORD_EVIDENCE' }); });
+    return () => { controller.abort(); request.current?.abort(); };
+  }, []);
+  const keyFor = (source: SourceRef) => [source.userFileId, source.generation, source.chunkIndex].join(':');
+  const toggle = (source: Evidence) => {
+    const key = keyFor(source);
+    setSelected(old => old.includes(key) ? old.filter(x => x !== key) : old.length < 6 ? [...old, key] : old);
+    setAnswer(null);
+  };
+  const ask = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!capabilities?.enabled || !consent || question.trim().length < 4) return;
+    const sources: SourceRef[] = results.evidence.filter(e => selected.includes(keyFor(e)))
+      .map(e => ({ userFileId: e.userFileId, generation: e.generation, chunkIndex: e.chunkIndex }));
+    if (!sources.length || sources.length > 6) { setError('请勾选 1–6 个来源片段'); return; }
+    // Require a new explicit check for every subsequent model request.
+    setConsent(false);
+    request.current?.abort();
+    const controller = new AbortController(); request.current = controller;
+    setRunning(true); setError(''); setAnswer(null);
+    const timeout = window.setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await knowledgeApi.answer(question.trim(), sources, consent, controller.signal);
+      if (request.current === controller && !controller.signal.aborted) setAnswer(response);
+    } catch (e) {
+      if (request.current === controller) setError(controller.signal.aborted ? '回答超时，请稍后重试' : errorMessage(e));
+    } finally {
+      window.clearTimeout(timeout);
+      if (request.current === controller) setRunning(false);
+    }
+  };
+  return <section className="kw-assistant" aria-label="基于证据的模型问答">
+    <div className="kw-section-title">
+      <div><div className="kw-eyebrow"><MaterialIcon>smart_toy</MaterialIcon>可选 AI 问答</div>
+        <h3>从选定证据中整理答案</h3>
+        <p>本次只会使用你主动选择的片段；没有进行语义搜索或全盘文件分析。</p>
+      </div>
+      <span className="kw-state">{capabilities?.enabled ? '模型可用' : '默认关闭'}</span>
+    </div>
+    {!capabilities?.enabled
+      ? <p className="kw-footnote">当前部署没有启用模型服务。你仍可使用正文检索和证据阅读；管理员可以按照部署文档配置。</p>
+      : <form onSubmit={ask}>
+        <fieldset className="kw-source-pick">
+          <legend>勾选证据（{selected.length}/6）</legend>
+          {results.evidence.map(hit => <label key={keyFor(hit)}>
+            <input type="checkbox" checked={selected.includes(keyFor(hit))}
+              disabled={!selected.includes(keyFor(hit)) && selected.length >= 6} onChange={() => toggle(hit)} />
+            <span>{hit.fileName} · 片段 {hit.chunkIndex + 1}</span>
+          </label>)}
+        </fieldset>
+        <label htmlFor="kw-ai-question" className="kw-answer-label">你想从这些资料中了解什么？</label>
+        <textarea id="kw-ai-question" rows={3} maxLength={500} value={question}
+          onChange={event => { setQuestion(event.target.value); setAnswer(null); }}
+          placeholder="例如：这些片段如何解释断点续传？" />
+        <label className="kw-consent">
+          <input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />
+          <span>我同意将本次问题、所选片段及其文件名发送到部署方配置的模型服务（可能位于外部）。</span>
+        </label>
+        <div className="kw-answer-actions">
+          <span>AI 答案可能出错，请核对原文。</span>
+          <button type="submit" disabled={running || !consent || !selected.length || question.trim().length < 4}>
+            {running ? '正在整理…' : '生成带引用的回答'}
+          </button>
+        </div>
+      </form>}
+    {error && <div role="alert" className="kw-error">{error}</div>}
+    {answer && <section className="kw-answer-result" aria-label="模型回答">
+      <h4>{answer.mode === 'INSUFFICIENT_EVIDENCE' ? '现有证据不足' : '模型回答'}</h4>
+      <p className="kw-answer-text">{answer.answer}</p>
+      {answer.citations.length > 0 && <div className="kw-answer-sources">
+        <strong>引用来源 · 点击核对</strong>
+        {answer.citations.map(source => <button type="button" key={source.citationId}
+          onClick={() => onSourceOpen(source.evidence)}>
+          [{source.citationId}] {source.evidence.fileName} · 片段 {source.evidence.chunkIndex + 1}
+          <MaterialIcon>north_east</MaterialIcon>
+        </button>)}
+      </div>}
+    </section>}
+  </section>;
 }

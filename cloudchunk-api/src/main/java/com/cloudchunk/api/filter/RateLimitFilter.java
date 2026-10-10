@@ -33,6 +33,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final CloudchunkProperties.RateLimit cfg;
     private final Counter uploadRejected;
     private final Counter downloadRejected;
+    private final Counter aiRejected;
 
     public RateLimitFilter(RateLimiter rateLimiter,
                            CloudchunkProperties props,
@@ -46,6 +47,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.downloadRejected = Counter.builder("cloudchunk.rate_limit.rejected")
                 .tag("endpoint", "download")
                 .description("Download requests rejected by rate limiter")
+                .register(registry);
+        this.aiRejected = Counter.builder("cloudchunk.rate_limit.rejected")
+                .tag("endpoint", "ai_answer")
+                .description("AI answer requests rejected by rate limiter")
                 .register(registry);
     }
 
@@ -94,6 +99,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 log.debug("rate-limit download userId={}", userId);
                 reject(response);
                 return;
+            }
+        }
+
+        // Cluster-wide per-user burst guard for costly optional model calls.
+        if ("POST".equalsIgnoreCase(method) && "/api/v1/knowledge/assistant/answer".equals(path)) {
+            Long userId = UserContext.get();
+            if (userId == null) { rejectUnauthorized(response); return; }
+            if (!rateLimiter.tryAcquire("cc:rate:ai-answer:" + userId, 1, 2)) {
+                aiRejected.increment(); reject(response); return;
             }
         }
 

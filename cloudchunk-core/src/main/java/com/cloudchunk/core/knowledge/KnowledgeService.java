@@ -65,6 +65,15 @@ public class KnowledgeService {
         return new SearchResult(firstPage(rows), rows.size() > PAGE_SIZE, "LITERAL_KEYWORD");
     }
 
+    /** Read exactly one evidence span under live ACL; never trust browser-supplied content. */
+    public Evidence source(long userId, long userFileId, long generation, int chunkIndex) {
+        if (generation < 1 || chunkIndex < 0) return null;
+        List<Evidence> rows = jdbc.query(EVIDENCE
+                + " AND u.id=? AND k.generation=? AND c.chunk_index=? LIMIT 1",
+                (rs, n) -> evidence(rs), userId, userFileId, generation, chunkIndex);
+        return rows.isEmpty() ? null : rows.getFirst();
+    }
+
     public BlockPage blocks(long userId, long userFileId, long generation, int page) {
         authorize(userId, userFileId);
         List<Evidence> rows = jdbc.query(EVIDENCE + " AND u.id=? AND k.generation=?"
