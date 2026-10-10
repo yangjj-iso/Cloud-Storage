@@ -49,7 +49,9 @@ public class HybridSearchService {
         double[] question;
         try{
             budget.reserve(userId,AiDailyCallBudget.Kind.EMBEDDING);
-            question=provider.embed(query.strip());
+            EmbeddingGateway.Embedding embedded=provider.embedWithUsage(query.strip());
+            budget.recordReported(userId,AiDailyCallBudget.Kind.EMBEDDING,embedded.usage());
+            question=embedded.vector();
         }
         catch(BizException ex) {
             if(ex.getErrorCode()!=ErrorCode.AI_PROVIDER_UNAVAILABLE)throw ex;

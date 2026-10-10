@@ -63,7 +63,9 @@ public class GroundedAnswerService {
             sources.add(new CitedSource("S" + (++n), evidence));
         }
         budget.reserve(userId, AiDailyCallBudget.Kind.CHAT);
-        String answer = gateway.complete(request.question().strip(),sources);
+        ChatGateway.Completion completion=gateway.completeWithUsage(request.question().strip(),sources);
+        budget.recordReported(userId,AiDailyCallBudget.Kind.CHAT,completion.usage());
+        String answer=completion.text();
         if ("资料不足，无法回答。".equals(answer) || "资料不足，无法回答".equals(answer)) {
             return new AnswerResponse("资料不足，无法回答。",List.of(),"INSUFFICIENT_EVIDENCE");
         }
