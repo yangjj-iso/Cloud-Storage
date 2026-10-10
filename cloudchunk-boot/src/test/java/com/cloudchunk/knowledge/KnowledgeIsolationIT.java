@@ -30,7 +30,7 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 7,"V7 must actually execute");
+        assertTrue(result.migrationsExecuted >= 8,"V8 must actually execute");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
@@ -115,7 +115,9 @@ class KnowledgeIsolationIT {
         assertEquals("READY",semantic.status(1,101).status());
         var hybrid=new com.cloudchunk.core.knowledge.HybridSearchService(
             service,jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
-            mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
+            mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class),
+            mock(com.cloudchunk.core.knowledge.QdrantVectorStore.class),
+            mock(com.cloudchunk.core.knowledge.QdrantMirrorService.class));
         var found=hybrid.search(1,"how do uploads work",true);
         assertEquals("HYBRID_RRF_LIMITED",found.mode());
         assertEquals("101",found.evidence().getFirst().userFileId());
@@ -177,6 +179,42 @@ class KnowledgeIsolationIT {
             assertThrows(com.cloudchunk.common.exception.BizException.class,
                 () -> guard.reserve(7L,com.cloudchunk.core.knowledge.AiDailyCallBudget.Kind.EMBEDDING));
         } finally {pool.shutdownNow();}
+    }
+    @Test void qdrantMirrorReconcilesAuthorizedVectorsAndPrunesRevokedPointers() throws Exception {
+        var first=claim();publish(first,"private vector source");
+        var gateway=mock(com.cloudchunk.core.knowledge.EmbeddingGateway.class);
+        String modelKey="e".repeat(64);
+        when(gateway.configured()).thenReturn(true);
+        when(gateway.modelKey()).thenReturn(modelKey);
+        when(gateway.dimensions()).thenReturn(8);
+        when(gateway.embed(anyString())).thenReturn(new double[]{1,0,0,0,0,0,0,0});
+        var semantic=new com.cloudchunk.core.knowledge.SemanticIndexService(
+            jdbc,gateway,new com.fasterxml.jackson.databind.ObjectMapper(),
+            new DataSourceTransactionManager(jdbc.getDataSource()),
+            mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
+        semantic.request(1,101,true);semantic.workOne();
+        var store=mock(com.cloudchunk.core.knowledge.QdrantVectorStore.class);
+        when(store.enabled()).thenReturn(true);
+        var mirror=new com.cloudchunk.core.knowledge.QdrantMirrorService(
+            jdbc,gateway,store,new com.fasterxml.jackson.databind.ObjectMapper());
+        assertFalse(mirror.readyForUser(1));
+        mirror.syncOne();
+        verify(store).upsert(eq(modelKey),eq(8),argThat(points->
+            points.size()==1 && points.getFirst().userId()==1 &&
+            points.getFirst().fileId().equals(FILE)));
+        assertTrue(mirror.readyForUser(1));
+        assertFalse(mirror.readyForUser(2),"unconsented second owner is never mirrored");
+        String pointId=com.cloudchunk.core.knowledge.QdrantVectorStore
+            .pointId(1L,FILE,first.generation(),0,modelKey);
+        semantic.revoke(1,101);
+        assertFalse(mirror.readyForUser(1));
+        when(store.scroll(eq(modelKey),isNull(),eq(40)))
+            .thenReturn(new com.cloudchunk.core.knowledge.QdrantVectorStore.Page(
+                java.util.List.of(new com.cloudchunk.core.knowledge.QdrantVectorStore.Hit(
+                    pointId,1L,FILE,first.generation(),0,0.7)),
+                com.fasterxml.jackson.databind.node.NullNode.getInstance()));
+        mirror.pruneOne();
+        verify(store).delete(eq(modelKey),eq(java.util.List.of(pointId)));
     }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
