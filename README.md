@@ -151,6 +151,7 @@ npm run dev
 - [可观测性与链路追踪](./docs/10-observability.md)：指标、日志、Jaeger 以及异步 Trace 上下文传播。
 - [AI 证据问答](./docs/12-ai-grounded-answer.md)：可选模型配置、单次授权、引用验证和使用边界。
 - [混合检索 M2.2](./docs/13-ai-hybrid-retrieval.md)：用户授权的 Embedding 索引、混合排序与当前限制。
+- [AI 一步问答](./docs/14-ai-one-step-ask.md)：明确授权后自动检索少量来源并生成引用回答。
 
 ## 验证
 

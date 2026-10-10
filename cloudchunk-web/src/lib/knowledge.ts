@@ -34,6 +34,11 @@ export interface AnswerResponse {
   citations: { citationId: string; evidence: Evidence }[];
   mode: 'MODEL_WITH_CITATIONS' | 'INSUFFICIENT_EVIDENCE';
 }
+export interface AutoAskResponse {
+  response: AnswerResponse;
+  retrievalMode: SearchResult['mode'];
+  selectedCount: number;
+}
 
 async function request<T>(path: string, signal: AbortSignal, body?: unknown, overrideMethod?: 'DELETE'): Promise<T> {
   const response = await fetch(`/api/v1/knowledge${path}`, {
@@ -77,6 +82,8 @@ export const knowledgeApi = {
   index: (id: string, signal: AbortSignal) => request<void>(`/documents/${encodeURIComponent(id)}/index`, signal, {}),
   assistantCapabilities: (signal: AbortSignal) =>
     request<AssistantCapabilities>('/assistant/capabilities', signal),
+  autoAsk: (question: string, consent: boolean, signal: AbortSignal) =>
+    request<AutoAskResponse>('/assistant/ask', signal, { question, consent }),
   answer: (question: string, sources: SourceRef[], consent: boolean, signal: AbortSignal) =>
     request<AnswerResponse>('/assistant/answer', signal, { question, sources, consent }),
   blocks: (id: string, generation: number, page: number, signal: AbortSignal) =>

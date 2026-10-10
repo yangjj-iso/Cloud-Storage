@@ -83,3 +83,12 @@
 .kw-search-mode-hint { color:#607487; font-size:12px; line-height:1.8; margin-bottom:12px; }
 .kw-semantic-status { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:11px; color:#28665a; }
 .kw-semantic-status small { color:#8d5b40; font-size:11px; }
+
+.kw-direct-ask { margin-bottom:24px; padding:22px; border:1px solid #bcdcd0; border-radius:16px;
+  background:linear-gradient(135deg,#f0f8f4 0%,#fafcfb 70%,#f4f8fb 100%); }
+.kw-direct-ask h3 { margin:12px 0 8px; font-size:18px; font-weight:650; color:var(--kw-ink); }
+.kw-direct-ask > p { margin:0 0 16px; }
+.kw-direct-ask textarea { width:100%; border:1px solid #bbd2c8; padding:12px 14px; background:white;
+  border-radius:10px; resize:vertical; line-height:1.7; color:var(--kw-ink); }
+.kw-direct-ask textarea:focus-visible { outline:2px solid #8ab4a1; outline-offset:2px; }
+@media (max-width:640px) { .kw-direct-ask { padding:16px; } }
