@@ -23,10 +23,10 @@ class DisposableDockerDrillTest(unittest.TestCase):
             directory = Path(d)
             sql = directory / "cloudchunk.sql"
             sql.write_text(
-                "CREATE TABLE user_file (id BIGINT PRIMARY KEY, file_name VARCHAR(255));\\n"
-                "INSERT INTO user_file VALUES (1, 'ci-fixture-only');\\n"
-                "CREATE TABLE flyway_schema_history (installed_rank INT PRIMARY KEY, version VARCHAR(20), success BOOLEAN);\\n"
-                "INSERT INTO flyway_schema_history VALUES (1, '13', 1);\\n",
+                "CREATE TABLE user_file (id BIGINT PRIMARY KEY, file_name VARCHAR(255));\n"
+                "INSERT INTO user_file VALUES (1, 'ci-fixture-only');\n"
+                "CREATE TABLE flyway_schema_history (installed_rank INT PRIMARY KEY, version VARCHAR(20), success BOOLEAN);\n"
+                "INSERT INTO flyway_schema_history VALUES (1, '13', 1);\n",
                 encoding="utf-8",
             )
             artifacts = {"cloudchunk.sql": snapshot.artifact_info(sql)}
