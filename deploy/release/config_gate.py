@@ -49,6 +49,22 @@ def load_env(path):
     return values
 
 
+def check_private_env_file(path):
+    file = pathlib.Path(path)
+    if (file.is_symlink() or not file.is_file() or
+            stat.S_IMODE(file.stat().st_mode) & 0o077):
+        raise GateError("production env file must be private (0600) and not a symlink")
+
+
+def is_https_endpoint(value):
+    try:
+        parsed = urlsplit(value)
+        return (parsed.scheme == "https" and bool(parsed.hostname) and
+                not parsed.username and not parsed.password and not parsed.fragment)
+    except ValueError:
+        return False
+
+
 def check_env(values, production=False):
     missing = sorted(k for k in CORE if not values.get(k))
     if missing:
@@ -74,12 +90,12 @@ def check_env(values, production=False):
     for prefix in ("AI_CHAT", "AI_EMBEDDING"):
         if values.get(prefix + "_ENABLED", "false").lower() == "true":
             endpoint = values.get(prefix + "_ENDPOINT", "")
-            if not endpoint.startswith("https://") or not values.get(prefix + "_MODEL") or not values.get(prefix + "_API_KEY"):
+            if not is_https_endpoint(endpoint) or not values.get(prefix + "_MODEL") or not values.get(prefix + "_API_KEY"):
                 raise GateError(prefix + " requires HTTPS endpoint, model and key")
             if values.get(prefix + "_ALLOW_HTTP", "false").lower() != "false":
                 raise GateError(prefix + " cannot allow plaintext endpoints")
     if values.get("AI_QDRANT_ENABLED", "false").lower() == "true":
-        if (not values.get("AI_QDRANT_URL", "").startswith("https://") or
+        if (not is_https_endpoint(values.get("AI_QDRANT_URL", "")) or
                 not values.get("AI_QDRANT_API_KEY") or
                 values.get("AI_QDRANT_ALLOW_HTTP", "false").lower() != "false"):
             raise GateError("AI_QDRANT requires authenticated HTTPS in production")
@@ -103,7 +119,7 @@ def check_compose(config):
     for name, service in services.items():
         if not isinstance(service, dict):
             raise GateError("invalid Compose service: " + name)
-        image = service.get("image", "")
+        if service.get("network_mode") == "host" or service.get("privileged"):\n            raise GateError(name + " cannot use host network or privileged mode")\n        image = service.get("image", "")
         if not isinstance(image, str) or not DIGEST.search(image) or service.get("build"):
             raise GateError(name + " image must be immutable by sha256 digest; no builds")
         for port in service.get("ports") or []:

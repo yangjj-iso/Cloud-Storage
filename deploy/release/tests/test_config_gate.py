@@ -44,7 +44,7 @@ class ConfigGateTest(unittest.TestCase):
                 with self.assertRaises(gate.GateError):
                     gate.check_env({**self.good, key: value}, production=True)
 
-    def test_optional_ai_requires_explicit_HTTPS(self):
+    def test_private_prod_env_permissions(self):\n        with tempfile.TemporaryDirectory() as d:\n            p = pathlib.Path(d) / "production.env"\n            p.write_text("NOT_A_SECRET=example")\n            p.chmod(0o644)\n            with self.assertRaises(gate.GateError):\n                gate.check_private_env_file(p)\n            p.chmod(0o600)\n            gate.check_private_env_file(p)\n\n    def test_optional_ai_requires_explicit_HTTPS(self):
         with self.assertRaises(gate.GateError):
             gate.check_env({**self.good, "AI_CHAT_ENABLED": "true",
                             "AI_CHAT_ENDPOINT": "http://model.local"}, production=True)
@@ -64,7 +64,7 @@ class ConfigGateTest(unittest.TestCase):
                 with self.assertRaises(gate.GateError):
                     gate.check_compose(data)
 
-    def test_duplicate_env_keys_are_blocked(self):
+    def test_compose_refuses_host_network(self):\n        cfg = self.compose()\n        cfg["services"]["api"]["network_mode"] = "host"\n        with self.assertRaises(gate.GateError):\n            gate.check_compose(cfg)\n\n    def test_duplicate_env_keys_are_blocked(self):
         with tempfile.TemporaryDirectory() as d:
             p = pathlib.Path(d) / ".env"
             p.write_text("MYSQL_ROOT_PASSWORD=first\nMYSQL_ROOT_PASSWORD=second\n")
