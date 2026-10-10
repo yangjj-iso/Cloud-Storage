@@ -9,6 +9,7 @@ import com.cloudchunk.core.knowledge.SemanticIndexService;
 import com.cloudchunk.core.knowledge.HybridSearchService;
 import com.cloudchunk.core.knowledge.AutoAnswerService;
 import com.cloudchunk.core.knowledge.AiDailyCallBudget;
+import com.cloudchunk.core.knowledge.QdrantMirrorService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,15 +24,18 @@ public class KnowledgeController {
     private final HybridSearchService hybrid;
     private final AutoAnswerService autoAnswer;
     private final AiDailyCallBudget budget;
+    private final QdrantMirrorService mirror;
     public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
                                SemanticIndexService semantic, HybridSearchService hybrid,
-                               AutoAnswerService autoAnswer, AiDailyCallBudget budget) {
+                               AutoAnswerService autoAnswer, AiDailyCallBudget budget,
+                               QdrantMirrorService mirror) {
         this.service = service;
         this.assistant = assistant;
         this.semantic = semantic;
         this.hybrid = hybrid;
         this.autoAnswer = autoAnswer;
         this.budget = budget;
+        this.mirror = mirror;
     }
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
@@ -71,6 +75,10 @@ public class KnowledgeController {
     @PostMapping("/assistant/ask")
     public ResponseEntity<R<AutoAskResponse>> autoAsk(@RequestBody AutoAskRequest request) {
         return noStore(autoAnswer.ask(UserContext.requireUserId(), request));
+    }
+    @GetMapping("/semantic/health")
+    public ResponseEntity<R<QdrantMirrorService.MirrorHealth>> semanticHealth() {
+        return noStore(mirror.healthForUser(UserContext.requireUserId()));
     }
     @GetMapping("/semantic/capabilities")
     public ResponseEntity<R<SemanticIndexService.Capabilities>> semanticCapabilities() {

@@ -100,6 +100,20 @@ public class QdrantVectorStore {
         catch(InterruptedException e){Thread.currentThread().interrupt();throw new Unavailable("Qdrant interrupted",e);}
         catch(Exception e){throw new Unavailable("Qdrant unavailable",e);}
     }
+    /** Non-mutating collection probe, safe for authenticated user health displays. */
+    public boolean collectionAvailable(String modelKey,int dimensions) {
+        if(!enabled || dimensions<8 || dimensions>2048)return false;
+        try {
+            JsonNode result=call("GET","/collections/"+collection(modelKey),null);
+            if(result==null)return false;
+            JsonNode vectors=result.path("result").path("config").path("params").path("vectors");
+            return vectors.path("size").asInt(-1)==dimensions
+                && "Cosine".equalsIgnoreCase(vectors.path("distance").asText());
+        } catch(Unavailable unavailable) {
+            return false; // Never leak network errors/credentials to user-facing status.
+        }
+    }
+
     /** Create if missing, and verify existing collection size and cosine distance before writing. */
     public void ensureCollection(String modelKey,int dimensions) {
         if(dimensions<8 || dimensions>2048)throw new Unavailable("invalid vector dimensions");
