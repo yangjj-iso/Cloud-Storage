@@ -164,6 +164,10 @@ cloudchunk:
     batch-size: 500
     max-batches-per-run: 20
   ai:
+    budget:
+      # Hard per-user UTC-day attempted provider call ceilings (not token/dollar billing).
+      chat-calls-per-day: ${AI_CHAT_CALLS_PER_DAY:20}
+      embedding-calls-per-day: ${AI_EMBEDDING_CALLS_PER_DAY:100}
     embedding:
       enabled: ${AI_EMBEDDING_ENABLED:false}
       endpoint: ${AI_EMBEDDING_ENDPOINT:}

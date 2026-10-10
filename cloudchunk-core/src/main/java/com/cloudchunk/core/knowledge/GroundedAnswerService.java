@@ -21,11 +21,14 @@ public class GroundedAnswerService {
     private static final Pattern CITATION = Pattern.compile("\\[S([0-9]+)\\]");
     private final KnowledgeService knowledge;
     private final ChatGateway gateway;
+    private final AiDailyCallBudget budget;
     private final boolean enabled;
 
-    public GroundedAnswerService(KnowledgeService knowledge, ChatGateway gateway, Environment env) {
+    public GroundedAnswerService(KnowledgeService knowledge, ChatGateway gateway, Environment env,
+                                AiDailyCallBudget budget) {
         this.knowledge = knowledge;
         this.gateway = gateway;
+        this.budget = budget;
         this.enabled = Boolean.parseBoolean(env.getProperty("cloudchunk.ai.chat.enabled","false"));
     }
 
@@ -59,6 +62,7 @@ public class GroundedAnswerService {
             if (evidence == null) throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
             sources.add(new CitedSource("S" + (++n), evidence));
         }
+        budget.reserve(userId, AiDailyCallBudget.Kind.CHAT);
         String answer = gateway.complete(request.question().strip(),sources);
         if ("资料不足，无法回答。".equals(answer) || "资料不足，无法回答".equals(answer)) {
             return new AnswerResponse("资料不足，无法回答。",List.of(),"INSUFFICIENT_EVIDENCE");
