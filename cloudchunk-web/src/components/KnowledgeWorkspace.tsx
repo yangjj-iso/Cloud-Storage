@@ -84,11 +84,12 @@ export function KnowledgeWorkspace() {
     setSearching(true); setSearchError(''); setResults(null); setSelection(null); setSearched(value);
     const timer = window.setTimeout(() => current.abort(), 15000);
     try {
-      const data = semanticMode && semanticCapabilities?.enabled
+      const sendingSemantic = semanticMode && Boolean(semanticCapabilities?.enabled);
+      // Consume the consent even if the model request fails.
+      if (sendingSemantic) setSemanticConsent(false);
+      const data = sendingSemantic
         ? await knowledgeApi.semanticSearch(value, semanticConsent, current.signal)
         : await knowledgeApi.search(value, current.signal);
-      // Model transmission consent applies to this query only.
-      if (semanticMode) setSemanticConsent(false);
       if (!current.signal.aborted) setResults(data);
     } catch (error) {
       if (searchRequest.current === current) setSearchError(current.signal.aborted ? '搜索超时，请缩短关键词后重试' : errorMessage(error));

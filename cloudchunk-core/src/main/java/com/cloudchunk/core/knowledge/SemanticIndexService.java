@@ -82,6 +82,12 @@ public class SemanticIndexService {
     }
     public void workOne() {
         if(!provider.configured())return;
+        // A worker crash after its final claim must not leave a RUNNING row stuck forever.
+        jdbc.update("""
+            UPDATE knowledge_embedding_job SET status='FAILED',claim_token=NULL,lease_until=NULL,
+              updated_at=NOW(6)
+            WHERE model_key=? AND status='RUNNING' AND lease_until<NOW(6) AND attempts>=3
+            """,provider.modelKey());
         List<Job> list=jdbc.query("""
             SELECT file_id,generation,model_key,user_id,next_index FROM knowledge_embedding_job
             WHERE model_key=? AND attempts<3
