@@ -32,9 +32,8 @@ services:
   web:
     image: ${CLOUDCHUNK_WEB_IMAGE:?pin_frontend_digest}
     build: !reset null
-    ports: !reset []
-    # Web served only on loopback; terminate TLS at a trusted reverse proxy.
-    ports: ["127.0.0.1:8088:80"]
+    # !override replaces the base public port (merge/append would be unsafe).
+    ports: !override ["127.0.0.1:8088:80"]
   jaeger:
     image: ${CC_JAEGER_IMAGE:?pin_jaeger_digest}
     ports: !reset []
