@@ -31,7 +31,7 @@ export function VectorHealthStrip() {
   return <div className="kw-vector-health" aria-label="当前账号的语义索引健康状态">
     <MaterialIcon>{health?.state === 'READY' ? 'verified' : 'monitor_heart'}</MaterialIcon>
     <span>{error ? '语义索引状态暂不可用' : health ? states[health.state] : '正在检查语义索引状态…'}</span>
-    {health && health.readyDocuments > 0 &&
+    {health && health.readyDocuments > 0 && health.state !== 'MYSQL_ONLY' &&
       <span className="kw-vector-progress">已同步 {health.mirroredDocuments} / {health.readyDocuments} 份</span>}
     <button type="button" title="刷新语义索引状态" aria-label="刷新语义索引状态"
       onClick={() => setRefresh(x => x + 1)}><MaterialIcon>refresh</MaterialIcon></button>

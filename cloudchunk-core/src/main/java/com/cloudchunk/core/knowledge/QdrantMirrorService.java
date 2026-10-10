@@ -48,7 +48,7 @@ public class QdrantMirrorService {
             """,(rs,n)->new long[]{rs.getLong(1),rs.getLong(2)},userId,embedding.modelKey());
         long total=counters==null?0:counters[0];
         long synced=counters==null?0:counters[1];
-        if(!store.enabled())return new MirrorHealth("MYSQL_ONLY",total,0,total,false);
+        if(!store.enabled())return new MirrorHealth("MYSQL_ONLY",total,0,0,false);
         if(total==0)return new MirrorHealth("NO_INDEX",0,0,0,false);
         if(synced<total)return new MirrorHealth("SYNCING",total,synced,total-synced,false);
         boolean reachable=store.collectionAvailable(embedding.modelKey(),embedding.dimensions());

@@ -194,9 +194,11 @@ class KnowledgeIsolationIT {
             mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class));
         semantic.request(1,101,true);semantic.workOne();
         var store=mock(com.cloudchunk.core.knowledge.QdrantVectorStore.class);
-        when(store.enabled()).thenReturn(true);
         var mirror=new com.cloudchunk.core.knowledge.QdrantMirrorService(
             jdbc,gateway,store,new com.fasterxml.jackson.databind.ObjectMapper());
+        assertEquals("MYSQL_ONLY",mirror.healthForUser(1).state());
+        assertEquals(0,mirror.healthForUser(1).pendingDocuments());
+        when(store.enabled()).thenReturn(true);
         assertFalse(mirror.readyForUser(1));
         assertEquals("SYNCING",mirror.healthForUser(1).state());
         mirror.syncOne();
