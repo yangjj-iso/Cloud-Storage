@@ -222,6 +222,8 @@ function AssistantPanel({ results, onSourceOpen }: { results: SearchResult; onSo
     const sources: SourceRef[] = results.evidence.filter(e => selected.includes(keyFor(e)))
       .map(e => ({ userFileId: e.userFileId, generation: e.generation, chunkIndex: e.chunkIndex }));
     if (!sources.length || sources.length > 6) { setError('请勾选 1–6 个来源片段'); return; }
+    // Require a new explicit check for every subsequent model request.
+    setConsent(false);
     request.current?.abort();
     const controller = new AbortController(); request.current = controller;
     setRunning(true); setError(''); setAnswer(null);
