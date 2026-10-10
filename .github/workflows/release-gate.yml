@@ -1,4 +1,4 @@
-name: M3.5 release gates
+name: M3.6 release and stability gates
 on:
   pull_request:
     branches: [main]
@@ -13,7 +13,11 @@ on:
         required: true
         default: false
       health_base:
-        description: "Production HTTPS base URL (only for live_readonly; no credentials)"
+        description: "Private HTTPS gateway directly routing /actuator/health + /api/v1/ping"
+        type: string
+        required: false
+      prometheus_base:
+        description: "Private HTTPS Prometheus base URL for post-deploy SLO gate"
         type: string
         required: false
 
@@ -123,6 +127,7 @@ jobs:
       MYSQL_PASSWORD: ${{ secrets.RELEASE_MYSQL_PASSWORD }}
       MYSQL_DB: ${{ secrets.RELEASE_MYSQL_DB }}
       RELEASE_HEALTH_BASE: ${{ inputs.health_base }}
+      RELEASE_PROMETHEUS_BASE: ${{ inputs.prometheus_base }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -134,7 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$MYSQL_HOST" && test -n "$MYSQL_USER" && test -n "$MYSQL_PASSWORD" && test -n "$MYSQL_DB"
-          test -n "$RELEASE_HEALTH_BASE"
+          test -n "$RELEASE_HEALTH_BASE" && test -n "$RELEASE_PROMETHEUS_BASE"
           python3 -c 'import os,sys; from urllib.parse import urlsplit; p=urlsplit(os.environ["RELEASE_HEALTH_BASE"]); sys.exit(0 if p.scheme=="https" and p.hostname and not (p.username or p.password or p.path not in ("","/") or p.query or p.fragment) else 1)'
-      - name: Run live read-only V13 + HTTP readiness gate
-        run: python3 deploy/preflight/check_release.py --phase ready --health-base "$RELEASE_HEALTH_BASE"
+      - name: Run read-only V13, health, Prometheus SLO and outbox acceptance
+        run: python3 deploy/release/post_deploy.py --health-base "$RELEASE_HEALTH_BASE" --prometheus-base "$RELEASE_PROMETHEUS_BASE"

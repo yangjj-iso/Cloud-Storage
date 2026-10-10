@@ -107,3 +107,9 @@ java -jar cloudchunk-boot/target/cloudchunk-boot.jar --spring.profiles.active=de
 - `PROMETHEUS_PUBLIC` 默认关闭。生产环境只应在管理网络、Sidecar 或网关白名单后开启。
 - Trace 标签不记录 Token、提取码、文件内容、邮箱验证码或对象存储临时签名。
 - 日志格式为 `trace=<traceId> span=<spanId>`；Trace ID 与 Jaeger 页面完全一致。
+
+## M3.6 生产监控接线与告警
+
+生产独立配置见 [M3.6 运行手册](./27-production-stability.md)。生产 Prometheus 通过 Compose 内部网络连接 `api:8080`，使用仅对 `GET /actuator/prometheus` 生效的独立 Bearer 令牌。指标不通过公网 Nginx 暴露，`PROMETHEUS_PUBLIC` 保持 `false`。生产 Grafana 关闭匿名登录并需要独立管理员密码。
+
+`deploy/observability/rules/cloudchunk-alerts.yml` 当前覆盖 API 抓取不可用、5xx 占比、P99 延迟、Outbox 发布失败、数据库连接池排队；Grafana 增加生产抓取与 MySQL 连接池观察面板。**规则存在不等于已经发送告警**：必须由运维将 Prometheus 连接至已配置接收人与升级路径的 Alertmanager，并进行一次通知演练。依赖组件的独立健康探测与 RocketMQ/Redis/MinIO 专用 exporter 仍是后续工作，不能把应用级指标当成全部依赖已覆盖。
