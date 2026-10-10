@@ -45,3 +45,6 @@
 @media (min-width:1280px) { .kw-with-evidence { grid-template-columns:minmax(0,1.25fr) minmax(330px,.85fr); }.kw-evidence { max-height:780px; overflow-y:auto; position:sticky; top:16px; } }
 @media (max-width:640px) { .kw-intro { padding:20px 16px; }.kw-search { flex-wrap:wrap; padding:10px; }.kw-search input { min-width:160px; }.kw-search button { width:100%; padding:10px; }.kw-document { gap:10px; padding:13px; }.kw-file-icon { width:32px; height:38px; }.kw-document-body { min-width:calc(100% - 45px); }.kw-document > .kw-button { margin-left:auto; }.kw-layout { gap:18px; } }
 @media (prefers-reduced-motion:reduce) { .kw * { transition:none !important; } }
+
+.kw-match { border-radius:3px; background:#f9e8a2; color:#503e0e; padding:0 2px; }
+.kw-block-selected { margin-left:-10px; margin-right:-10px; padding-left:10px; padding-right:10px; border-radius:8px; background:#f1f8f4; border-top-color:#8caf9c; }

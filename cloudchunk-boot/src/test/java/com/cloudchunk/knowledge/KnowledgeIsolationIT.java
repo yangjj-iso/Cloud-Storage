@@ -63,6 +63,27 @@ class KnowledgeIsolationIT {
         index.cleanDeleted();
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_chunk",Integer.class));
     }
+    @Test void recycleDuringExtractionKeepsDerivedDataForRestoreWithoutExposingIt() {
+        var c = claim();
+        jdbc.update("UPDATE user_file SET status=1 WHERE file_id=?", FILE);
+        publish(c, "restorable needle");
+        assertEquals("READY", jdbc.queryForObject(
+                "SELECT status FROM knowledge_document WHERE file_id=?", String.class, FILE));
+        assertTrue(service.search(1, "restorable").evidence().isEmpty());
+        assertTrue(service.search(2, "restorable").evidence().isEmpty());
+        jdbc.update("UPDATE user_file SET status=0 WHERE id=101");
+        assertEquals(1, service.search(1, "restorable").evidence().size());
+        assertTrue(service.search(2, "restorable").evidence().isEmpty());
+    }
+    @Test void orphanedContentIsGarbageCollectedWithoutRemovingRecycledContent() {
+        var c = claim(); publish(c, "private needle");
+        jdbc.update("UPDATE user_file SET status=1 WHERE file_id=?", FILE);
+        index.cleanDeleted();
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_document", Integer.class));
+        jdbc.update("DELETE FROM user_file WHERE file_id=?", FILE);
+        index.cleanDeleted();
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_document", Integer.class));
+    }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
         assertThrows(IllegalStateException.class,this::claim);

@@ -31,7 +31,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(classes = CloudchunkApplication.class,
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "cloudchunk.storage.type=local")
 @ActiveProfiles("api")
 class ApiApplicationContextIT {
 

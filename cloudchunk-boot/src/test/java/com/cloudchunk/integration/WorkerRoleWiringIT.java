@@ -37,8 +37,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(classes = CloudchunkApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
-        properties = "spring.autoconfigure.exclude="
-                + "org.apache.rocketmq.spring.autoconfigure.RocketMQAutoConfiguration")
+        properties = {
+            "spring.autoconfigure.exclude=org.apache.rocketmq.spring.autoconfigure.RocketMQAutoConfiguration",
+            "cloudchunk.storage.type=local"
+        })
 @ActiveProfiles("worker")
 class WorkerRoleWiringIT {
 
