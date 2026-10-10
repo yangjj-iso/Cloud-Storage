@@ -22,8 +22,13 @@ QUERIES = {
     "rps": 'sum(rate(http_server_requests_seconds_count{job="cloudchunk-api"}[5m])) or vector(0)',
     "five_xx": 'sum(rate(http_server_requests_seconds_count{job="cloudchunk-api",status=~"5.."}[5m])) or vector(0)',
     "p99": 'histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job="cloudchunk-api"}[5m])) by (le))',
-    "outbox_failures": 'sum(increase(cloudchunk_outbox_publish_failures_total{job="cloudchunk-api"}[10m])) or vector(0)',
 }
+
+
+OUTBOX_STALE = (
+    "SELECT COUNT(*) FROM event_outbox WHERE status IN (0, 1, 3) "
+    "AND created_at < NOW(3) - INTERVAL 10 MINUTE"
+)
 
 
 class GateError(Exception):
@@ -74,12 +79,17 @@ def query_prometheus(base, expression, opener=urllib.request.urlopen, now=time.t
 
 
 def evaluate(health_base, prometheus_base, query=query_prometheus,
-             readiness=None, max_5xx=0.05, max_p99=2.0, min_rps=0.1):
+             readiness=None, outbox_count=None, max_5xx=0.05, max_p99=2.0, min_rps=0.1):
     if readiness is None:
         readiness = lambda: check_release.evaluate(
             "ready", check_release.mysql_count, health_base)
     # Never skip the production database/health gate.
     database = readiness()
+    if outbox_count is None:
+        outbox_count = lambda: check_release.mysql_count(OUTBOX_STALE, "old outbox events")
+    stale_events = outbox_count()
+    if not isinstance(stale_events, int) or stale_events != 0:
+        raise GateError("stale pending/publishing/retrying outbox events exist")
     # Always check target connectivity, even if there is no user traffic.
     up = query(prometheus_base, QUERIES["api_up"])
     if up != 1.0:
@@ -93,14 +103,11 @@ def evaluate(health_base, prometheus_base, query=query_prometheus,
         p99 = query(prometheus_base, QUERIES["p99"])
         if p99 > max_p99:
             raise GateError("HTTP P99 breaches release threshold")
-    failures = query(prometheus_base, QUERIES["outbox_failures"])
-    if failures > 5:
-        raise GateError("outbox failures exceed release threshold")
     # No traffic => latency/error checks NOT verified, explicitly not a PASS for these metrics.
     return {"database": database, "scrape": "VERIFIED",
             "traffic": "ENOUGH_TO_EVALUATE" if rps >= min_rps else "INSUFFICIENT",
             "request_metrics": "VERIFIED" if rps >= min_rps else "NOT_EVALUATED",
-            "outbox_metrics": "VERIFIED"}
+            "outbox_old_unfinished": stale_events, "outbox_database": "VERIFIED"}
 
 
 def main(argv=None):

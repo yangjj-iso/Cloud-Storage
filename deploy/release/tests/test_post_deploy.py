@@ -12,19 +12,20 @@ spec.loader.exec_module(gate)
 
 
 class PostDeployTest(unittest.TestCase):
-    def good(self, rps=2, five_xx=0.01, p99=0.15, failures=0, up=1):
-        values = dict(api_up=up, rps=rps, five_xx=five_xx, p99=p99, outbox_failures=failures)
+    def good(self, rps=2, five_xx=0.01, p99=0.15, stale=0, up=1):
+        values = dict(api_up=up, rps=rps, five_xx=five_xx, p99=p99)
         def query(base, expr):
             return values[next(key for key, value in gate.QUERIES.items() if value == expr)]
         return lambda: gate.evaluate("https://ops.example.com", "https://prometheus.example.com",
-                                      query=query, readiness=lambda: {"status": "PASS"})
+                                      query=query, readiness=lambda: {"status": "PASS"},
+                                      outbox_count=lambda: stale)
 
     def test_healthy_release_and_idle_are_explicit(self):
         self.assertEqual("VERIFIED", self.good()()["request_metrics"])
         self.assertEqual("NOT_EVALUATED", self.good(rps=0)()["request_metrics"])
 
     def test_regressions_fail_closed(self):
-        for kw in ({"up": 0}, {"five_xx": 0.2}, {"p99": 4}, {"failures": 6}):
+        for kw in ({"up": 0}, {"five_xx": 0.2}, {"p99": 4}, {"stale": 1}):
             with self.subTest(kw=kw):
                 with self.assertRaises(gate.GateError):
                     self.good(**kw)()

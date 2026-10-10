@@ -12,7 +12,7 @@
 2. `METRICS_TOKEN_FILE` 必须为绝对路径，文件权限不开放给组/其他用户。Linux 上 Prometheus 镜像通常以 UID 65534 运行，可将文件属主设为运行容器的对应 UID 并赋予 `0400` 权限（先核实所使用镜像和 rootless 映射）；Compose 内挂载为只读。确认生产 API 的 `METRICS_SCRAPE_TOKEN` 来自相同环境变量。
 3. 设置 `GRAFANA_ADMIN_PASSWORD` 为独立强密码；生产叠加配置禁用 Grafana 匿名登录；Prometheus、Grafana、Jaeger 端口均不向宿主机开放。
 4. 运行 M3.5 的 `config_gate.py --mode production --env-file ... --compose-config -`。不满足文件权限、令牌一致性、镜像 digest、非公网暴露规则即阻断。
-5. 使用受限网络访问 Prometheus 的 `up{job="cloudchunk-api"}`（应为 1），Grafana 观察 5xx、P95/P99、Hikari、Outbox 发布失败、数据源与目标可用性。
+5. 使用受限网络访问 Prometheus 的 `up{job="cloudchunk-api"}`（应为 1），Grafana 观察 5xx、P95/P99、Hikari、Outbox 老化未完成事件、数据源与目标可用性。
 
 注意：Grafana 的默认密码必须修改、私有监控网络需要独立的访问控制；虽然 Prometheus 没有 host published port，但不应允许非受信任容器进入同一网络。
 
@@ -23,7 +23,6 @@
 | CloudChunkApiScrapeDown | 连续 2 分钟 API 指标不可抓取 | critical |
 | CloudChunkApiHigh5xx | 5xx 占比超过 5%，有一定流量且持续 5 分钟 | critical |
 | CloudChunkApiP99LatencyHigh | P99 超过 2 秒，持续 10 分钟 | warning |
-| CloudChunkOutboxPublishFailures | 10 分钟 Outbox 发布失败累计超过 5 次 | warning |
 | CloudChunkHikariConnectionsExhausted | Hikari 等待连接持续 5 分钟 | warning |
 
 阈值只是**默认初始值**，必须依据实际流量和 SLO 调整。规则由 Prometheus 评估，但本仓库**没有配置真实通知渠道**；生产启用前，须连接团队运营的 Alertmanager，配置 PagerDuty/邮件/工单接收人和升级策略，并用受控测试告警确认收到通知。
@@ -41,9 +40,9 @@ python3 deploy/release/post_deploy.py \
   --prometheus-base https://prometheus.ops.example.com
 ```
 
-该脚本首先检查 M3.4/M3.5 的 Flyway V13 成功状态、同目录活跃重名为 0、唯一索引、生成列、API 健康和 Ping，然后调用 Prometheus 即时查询（freshness 不超过 120 秒）：API `up=1`、5 分钟窗口 5xx 比例不高于 5%、P99 不高于 2 秒、10 分钟 Outbox 发布失败不超过 5。数据源未连通、无新样本、异常/非数值、DB 不兼容、健康失败都返回 JSON `BLOCKED` 并以退出码 2 阻断人工放流。
+该脚本首先检查 M3.4/M3.5 的 Flyway V13 成功状态、同目录活跃重名为 0、唯一索引、生成列、API 健康和 Ping，然后调用 Prometheus 即时查询（freshness 不超过 120 秒）：API `up=1`、5 分钟窗口 5xx 比例不高于 5%、P99 不高于 2 秒、MySQL event_outbox 中超过 10 分钟仍处于 pending/publishing/retry 的事件为 0。数据源未连通、无新样本、异常/非数值、DB 不兼容、历史未完成 Outbox 事件、健康失败都返回 JSON `BLOCKED` 并以退出码 2 阻断人工放流。
 
-当请求速率小于 `0.1/s` 时只保留可用性、数据库和 Outbox 检查，输出 `request_metrics=NOT_EVALUATED`，需要额外引流后复验才能宣称性能达标。不会因为低流量而自动回滚或清空数据。
+当请求速率小于 `0.1/s` 时只保留可用性、数据库和 Outbox MySQL 只读检查，输出 `request_metrics=NOT_EVALUATED`，需要额外引流后复验才能宣称性能达标。不会因为低流量而自动回滚或清空数据。
 
 GitHub `M3.6 release and stability gates` 的 `workflow_dispatch`（`live_readonly=true`）使用 `production` Environment 审批、`cloudchunk-release` 私有 self-hosted runner，只读数据库 Secrets 和 `health_base`/`prometheus_base`，执行同样的验收逻辑。它**不会发起部署或自动检测第三方部署已经完成**；接入实际部署编排系统后，可将此脚本作为发布后自动步骤，并以退出码作为切流阻断条件。
 
@@ -98,4 +97,4 @@ python3 -m unittest discover -s deploy/preflight/tests -v
 # CI 用真实 Docker + Prometheus promtool 校验规则语法及合成数据恢复
 ```
 
-M3.6 P0 的 CI 仅验证逻辑、Compose 解析、Prometheus 规则语法、构建及合成数据恢复，不对真实生产运行故障切换、生产消息恢复或流量切换演练。生产启用还需要：外部审批体系、生产 Grafana 账户、Alertmanager 通知接线、私有 CI Runner、镜像 SBOM/签名验证、真实演练记录与按 SLO 校准阈值。P1 才扩展组件级 exporter、故障注入、运维控制台与灾备 RPO/RTO 量化。
+M3.6 P0 的 CI 仅验证逻辑、Compose 解析、Prometheus 规则语法、构建及合成数据恢复，不对真实生产运行故障切换、生产消息恢复或流量切换演练。生产启用还需要：外部审批体系、生产 Grafana 账户、Alertmanager 通知接线、私有 CI Runner、镜像 SBOM/签名验证、真实演练记录与按 SLO 校准阈值。Worker 本身无 Web 端口，不在当前 Prometheus API scrape 覆盖范围；Outbox 故障通过只读 SQL 计数纳入发布验收，Worker 指标独立 exporter 为 P1。P1 才扩展组件级 exporter、故障注入、运维控制台与灾备 RPO/RTO 量化。

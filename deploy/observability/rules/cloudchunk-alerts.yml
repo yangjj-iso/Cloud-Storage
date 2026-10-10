@@ -24,11 +24,6 @@ groups:
         for: 10m
         labels: {severity: warning, service: api}
         annotations: {summary: "API P99 latency > 2s"}
-      - alert: CloudChunkOutboxPublishFailures
-        expr: increase(cloudchunk_outbox_publish_failures_total{job="cloudchunk-api"}[10m]) > 5
-        for: 2m
-        labels: {severity: warning, service: event-publisher}
-        annotations: {summary: "Repeated Outbox publish failures"}
       - alert: CloudChunkHikariConnectionsExhausted
         expr: hikaricp_connections_pending{job="cloudchunk-api"} > 0
         for: 5m
