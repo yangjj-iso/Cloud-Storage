@@ -60,8 +60,8 @@ python3 deploy/release/snapshot.py backup \
   --project cloudchunk \
   --output-dir /secure/cloudchunk/backups/backup-YYYYMMDD-HHMM \
   --release-sha "$(git rev-parse HEAD)" \
-  --maintenance-ack WRITERS_STOPPED \
-  --require-qdrant  # 未启用向量服务时去掉本行
+  --maintenance-ack WRITERS_STOPPED
+# 启用 Qdrant 时，在上述命令末尾额外加 --require-qdrant
 ```
 
 **备份不自动启停生产服务，不自动恢复生产流量。** 发生失败，带有不完整文件的输出目录不能作为备份；只有生成 manifest 的备份可进入恢复演练。备份材料必须离机、加密、限制读取权限并设定保留/轮换策略；SHA-256 清单只检查完整性，不能代替离机存储、加密或独立签名。记录维护窗口开始/结束、实例范围、备份目录、审批人、对象数量和校验结果（不记录密码、真实文件名或文件正文）。
@@ -99,7 +99,9 @@ docker compose --env-file /etc/cloudchunk/production.env \
 5. 从可信网络运行 `python3 deploy/preflight/check_release.py --phase ready --health-base https://files.example.com`。使用**临时专用账号**执行 M3.4 的 `drive_smoke.py`（不得用生产用户账号），另做人工文件上传、下载字节比对、后台队列、仪表盘、Redis Session、MinIO 和 Qdrant（启用时）可用性复核。
 6. 手工完成发布批准及流量恢复，持续观察健康状态、5xx、延迟、MySQL 连接、对象错误率、队列堆积、Outbox/Inbox 和 AI 提供商故障。记录可观测数据时间窗口和实际结果。
 
-健康预检的 HTTPS 入口必须是**仅受信任运维网络可访问的私有网关**，将 `/actuator/health` 与 `/api/v1/ping` 路由至后端 API；仓库自带 Web Nginx 只转发 `/api/`，不能直接将 Web 公网入口作为 `--health-base`。不要为了使检查通过而向公网开放 `/actuator/**`。\n\nGitHub `workflow_dispatch` 的 `live_readonly=true` 会在保护的 `production` Environment 下执行**只读** MySQL V13 和 HTTPS 健康预检；须在环境中提供 `RELEASE_MYSQL_HOST/PORT/USER/PASSWORD/DB` Secret（只读账号）及手动输入 `health_base`。该工作流没有生产部署/迁移权限。
+健康预检的 HTTPS 入口必须是**仅受信任运维网络可访问的私有网关**，将 `/actuator/health` 与 `/api/v1/ping` 路由至后端 API；仓库自带 Web Nginx 只转发 `/api/`，不能直接将 Web 公网入口作为 `--health-base`。不要为了使检查通过而向公网开放 `/actuator/**`。
+
+GitHub `workflow_dispatch` 的 `live_readonly=true` 会在保护的 `production` Environment 下执行**只读** MySQL V13 和 HTTPS 健康预检；须在环境中提供 `RELEASE_MYSQL_HOST/PORT/USER/PASSWORD/DB` Secret（只读账号）及手动输入 `health_base`。该工作流没有生产部署/迁移权限。
 
 ## 6. 回滚操作手册（人工审批、先选正确路径）
 
@@ -122,4 +124,4 @@ docker compose --env-file /etc/cloudchunk/production.env \
 
 ## 7. 交付与待补项
 
-本阶段交付可执行配置门禁、GitHub 只读发布门禁、备份/验证/隔离恢复工具、模拟单元测试及此 SOP。**需要人工配置** GitHub 保护规则与 Environment、机密配置、签名镜像、生产级 TLS/防火墙/容量，以及生产演练窗口。真正的跨机房副本、全自动零停机切流、数据库增量/PITR、外部对象存储复制、MinIO API 语义/消息重放全量演练仍是后续工作，不能把当前工具当作已实现能力。
+本阶段交付可执行配置门禁、GitHub 只读发布门禁、备份/验证/隔离恢复工具、模拟单元测试、使用合成数据的真实 Docker 恢复 CI 及此 SOP。**需要人工配置** GitHub 保护规则与 Environment、机密配置、签名镜像、生产级 TLS/防火墙/容量，以及生产演练窗口。真正的跨机房副本、全自动零停机切流、数据库增量/PITR、外部对象存储复制、MinIO API 语义/消息重放全量演练仍是后续工作，不能把当前工具当作已实现能力。
