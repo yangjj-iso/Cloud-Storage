@@ -1,0 +1,41 @@
+name: Knowledge workspace checks
+on:
+  pull_request:
+  push:
+    branches: ["feat/ai-knowledge-workspace"]
+permissions:
+  contents: read
+concurrency:
+  group: knowledge-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Verify backend and real MySQL / Redis integration tests
+        run: mvn -B verify
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudchunk-web/package-lock.json
+      - run: npm ci
+        working-directory: cloudchunk-web
+      - run: npm run build
+        working-directory: cloudchunk-web
