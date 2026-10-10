@@ -42,6 +42,12 @@ export interface AiCallCounter {
 export interface AiUsageSnapshot { dayUtc: string; chat: AiCallCounter; embedding: AiCallCounter }
 export interface SemanticIndexStatus { status: 'NOT_REQUESTED' | 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'STALE'; completed: number; total: number }
 export interface SourceRef { userFileId: string; generation: number; chunkIndex: number }
+export interface RenameAgentCapabilities { enabled: boolean; operation: string }
+export interface RenameProposal {
+  id: string; userFileId: string; oldName: string; newName: string; expiresAt: string;
+  status: 'PENDING' | 'APPLIED';
+}
+export interface RenameApplyResult { proposalId: string; userFileId: string; newName: string; status: string }
 export interface AnswerResponse {
   answer: string;
   citations: { citationId: string; evidence: Evidence }[];
@@ -100,6 +106,14 @@ export const knowledgeApi = {
     request<AssistantCapabilities>('/assistant/capabilities', signal),
   aiUsage: (signal: AbortSignal) =>
     request<AiUsageSnapshot>('/assistant/usage', signal),
+  renameAgentCapabilities: (signal: AbortSignal) =>
+    request<RenameAgentCapabilities>('/assistant/rename/capabilities',signal),
+  suggestRename: (source: SourceRef, consent: boolean, signal: AbortSignal) =>
+    request<RenameProposal>('/assistant/rename/suggest',signal,{source,consent}),
+  applyRename: (id: string, confirmed: boolean, signal: AbortSignal) =>
+    request<RenameApplyResult>('/assistant/rename/'+encodeURIComponent(id)+'/apply',signal,{confirmed}),
+  recentRenameProposals: (signal: AbortSignal) =>
+    request<RenameProposal[]>('/assistant/rename/recent',signal),
   autoAsk: (question: string, consent: boolean, signal: AbortSignal) =>
     request<AutoAskResponse>('/assistant/ask', signal, { question, consent }),
   answer: (question: string, sources: SourceRef[], consent: boolean, signal: AbortSignal) =>

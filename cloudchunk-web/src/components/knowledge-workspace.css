@@ -116,3 +116,13 @@
 .kw-token-usage { display:flex; flex-wrap:wrap; gap:6px 18px; padding-top:10px; margin-top:10px;
   border-top:1px solid #d9e8e0; font-size:11px; line-height:1.8; color:#526d61; }
 .kw-token-usage span { overflow-wrap:anywhere; }
+
+.kw-rename-agent { border:1px solid #cddfd6; padding:15px; margin:16px 0; border-radius:12px; background:#f7fbf9; }
+.kw-rename-agent h4 { margin:8px 0; font-size:14px; }
+.kw-rename-agent p { color:var(--kw-muted); font-size:12px; line-height:1.65; }
+.kw-rename-action { margin-top:12px; }
+.kw-rename-diff { display:grid; gap:7px; margin-top:10px; padding:12px; background:#fff; border-radius:9px; overflow-wrap:anywhere; }
+.kw-rename-diff > span { color:var(--kw-muted); font-size:11px; }
+.kw-rename-diff strong { font-size:13px; font-weight:650; }
+.kw-rename-buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.kw-rename-confirm { background:#246d54; color:white; }

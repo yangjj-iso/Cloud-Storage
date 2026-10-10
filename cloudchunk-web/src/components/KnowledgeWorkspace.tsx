@@ -6,6 +6,7 @@ import './knowledge-workspace.css';
 import { DirectAskPanel } from './DirectAskPanel';
 import { AiUsageBar } from './AiUsageBar';
 import { VectorHealthStrip } from './VectorHealthStrip';
+import { RenameAgentPanel } from './RenameAgentPanel';
 
 type Selection = { userFileId: string; fileName: string; generation: number; chunkIndex?: number };
 
@@ -236,6 +237,8 @@ function EvidencePanel({ selection, onClose }: { selection: Selection; onClose: 
     {error && <div className="kw-error" role="alert">{error}<button className="kw-button" onClick={() => setRefresh(v => v + 1)}>重试</button></div>}
     {!data && !error && <p role="status">正在重新校验权限并读取正文…</p>}
     {data?.blocks.length === 0 && <p className="kw-footnote">当前版本没有可显示片段。资料可能已重新处理，请刷新资料列表；这不表示原文件没有内容。</p>}
+    {data && data.blocks.length > 0 && <RenameAgentPanel
+      source={data.blocks.find(block => block.chunkIndex === selection.chunkIndex) ?? data.blocks[0]} />}
     {data?.blocks.map(block => <section className={`kw-block ${block.chunkIndex === selection.chunkIndex ? "kw-block-selected" : ""}`} key={block.chunkIndex}><h4>片段 {block.chunkIndex + 1}<span>字符 {block.startOffset}–{block.endOffset}</span></h4><p>{block.content}</p></section>)}
     <div className="kw-pagination"><button className="kw-button" disabled={page <= 1 || !data} onClick={() => setPage(p => p - 1)}>上一页</button><button className="kw-button" disabled={!data?.hasMore} onClick={() => setPage(p => p + 1)}>下一页</button></div>
   </aside>;

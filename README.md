@@ -156,6 +156,7 @@ npm run dev
 - [Qdrant 向量镜像](./docs/16-qdrant-vector-mirror.md)：可选加速、异步同步、权限复核与故障回退。
 - [Qdrant 真容器测试与索引健康](./docs/17-qdrant-health-evaluation.md)：真实 Qdrant 1.15 回归、检索合成基准和用户级镜像状态。
 - [AI Token 用量与中文检索评测](./docs/18-ai-evaluation-and-usage.md)：提供方用量、费用估算、延迟分位和基准脚本。
+- [受控 AI 文件操作 M2.8](./docs/19-ai-confirmed-rename.md)：基于原文生成建议、预览差异、二次确认重命名与审计。
 
 ## 验证
 
