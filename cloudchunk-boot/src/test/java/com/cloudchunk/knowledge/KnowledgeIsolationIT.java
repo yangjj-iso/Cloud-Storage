@@ -260,7 +260,7 @@ class KnowledgeIsolationIT {
                 "安全上传说明.txt [S1]",com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
         var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
         doAnswer(inv->{
-            jdbc.update("UPDATE user_file SET file_name=? WHERE id=101 AND user_id=1",inv.getArgument(2));
+            jdbc.update("UPDATE user_file SET file_name=? WHERE id=101 AND user_id=1",new Object[]{inv.getArgument(2)});
             return null;
         }).when(drive).rename(eq(101L),eq(1L),anyString());
         var agent=new com.cloudchunk.core.knowledge.AiRenameAgentService(
