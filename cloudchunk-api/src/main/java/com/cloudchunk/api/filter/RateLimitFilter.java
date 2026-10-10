@@ -103,7 +103,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         // Cluster-wide per-user burst guard for costly optional model calls.
-        if ("POST".equalsIgnoreCase(method) && "/api/v1/knowledge/assistant/answer".equals(path)) {
+        if ("POST".equalsIgnoreCase(method) && (
+                "/api/v1/knowledge/assistant/answer".equals(path) ||
+                "/api/v1/knowledge/assistant/ask".equals(path))) {
             Long userId = UserContext.get();
             if (userId == null) { rejectUnauthorized(response); return; }
             if (!rateLimiter.tryAcquire("cc:rate:ai-answer:" + userId, 1, 2)) {
