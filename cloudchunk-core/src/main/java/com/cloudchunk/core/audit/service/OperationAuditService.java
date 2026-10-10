@@ -2,6 +2,8 @@ package com.cloudchunk.core.audit.service;
 
 import com.cloudchunk.core.audit.entity.OperationLog;
 import com.cloudchunk.core.audit.mapper.OperationLogMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,6 +38,19 @@ public class OperationAuditService {
         }
     }
 
+    /** Read only the requesting user's bounded, metadata-only operation history. */
+    public record AuditItem(String operation,boolean success,int costMs,LocalDateTime at) {}
+    public List<AuditItem> driveHistory(long userId) {
+        return mapper.selectList(new LambdaQueryWrapper<OperationLog>()
+                .eq(OperationLog::getUserId,userId)
+                .in(OperationLog::getOpType,"DRIVE_MKDIR","DRIVE_RENAME","DRIVE_MOVE",
+                    "DRIVE_RECYCLE","DRIVE_RESTORE","DRIVE_PURGE")
+                .orderByDesc(OperationLog::getCreatedAt)
+                .last("LIMIT 30")).stream()
+            .map(row->new AuditItem(row.getOpType(),row.getResult()!=null&&row.getResult()==1,
+                row.getCostMs()==null?0:row.getCostMs(),row.getCreatedAt()))
+            .toList();
+    }
     private String limit(String value, int max) {
         if (value == null) return null;
         return value.length() <= max ? value : value.substring(0, max);

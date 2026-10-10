@@ -11,6 +11,7 @@ import com.cloudchunk.core.drive.dto.DriveRequests.ZipRequest;
 import com.cloudchunk.core.drive.dto.UserFileItem;
 import com.cloudchunk.core.drive.service.DriveZipService;
 import com.cloudchunk.core.drive.service.UserFileService;
+import com.cloudchunk.core.audit.service.OperationAuditService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -38,10 +39,18 @@ public class DriveController {
 
     private final UserFileService userFileService;
     private final DriveZipService driveZipService;
+    private final OperationAuditService audit;
 
-    public DriveController(UserFileService userFileService, DriveZipService driveZipService) {
+    public DriveController(UserFileService userFileService, DriveZipService driveZipService,
+                           OperationAuditService audit) {
         this.userFileService = userFileService;
         this.driveZipService = driveZipService;
+        this.audit = audit;
+    }
+
+    @GetMapping("/audit")
+    public R<List<OperationAuditService.AuditItem>> auditHistory() {
+        return R.ok(audit.driveHistory(UserContext.requireUserId()));
     }
 
     @PostMapping("/mkdir")
