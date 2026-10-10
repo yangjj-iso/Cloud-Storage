@@ -198,15 +198,26 @@ class KnowledgeIsolationIT {
         var mirror=new com.cloudchunk.core.knowledge.QdrantMirrorService(
             jdbc,gateway,store,new com.fasterxml.jackson.databind.ObjectMapper());
         assertFalse(mirror.readyForUser(1));
+        assertEquals("SYNCING",mirror.healthForUser(1).state());
         mirror.syncOne();
         verify(store).upsert(eq(modelKey),eq(8),argThat(points->
             points.size()==1 && points.getFirst().userId()==1 &&
             points.getFirst().fileId().equals(FILE)));
         assertTrue(mirror.readyForUser(1));
+        when(store.collectionAvailable(modelKey,8)).thenReturn(true);
+        var ownHealth=mirror.healthForUser(1);
+        assertEquals("READY",ownHealth.state());
+        assertEquals(1,ownHealth.readyDocuments());
+        assertEquals(1,ownHealth.mirroredDocuments());
+        assertEquals(0,ownHealth.pendingDocuments());
+        assertEquals("NO_INDEX",mirror.healthForUser(2).state());
+        when(store.collectionAvailable(modelKey,8)).thenReturn(false);
+        assertEquals("DEGRADED",mirror.healthForUser(1).state());
         assertFalse(mirror.readyForUser(2),"unconsented second owner is never mirrored");
         String pointId=com.cloudchunk.core.knowledge.QdrantVectorStore
             .pointId(1L,FILE,first.generation(),0,modelKey);
         semantic.revoke(1,101);
+        assertEquals("NO_INDEX",mirror.healthForUser(1).state());
         assertFalse(mirror.readyForUser(1));
         when(store.scroll(eq(modelKey),isNull(),eq(40)))
             .thenReturn(new com.cloudchunk.core.knowledge.QdrantVectorStore.Page(

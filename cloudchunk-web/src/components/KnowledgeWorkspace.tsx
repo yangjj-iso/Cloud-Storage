@@ -5,6 +5,7 @@ import { MaterialIcon } from './ui/MaterialIcon';
 import './knowledge-workspace.css';
 import { DirectAskPanel } from './DirectAskPanel';
 import { AiUsageBar } from './AiUsageBar';
+import { VectorHealthStrip } from './VectorHealthStrip';
 
 type Selection = { userFileId: string; fileName: string; generation: number; chunkIndex?: number };
 
@@ -150,6 +151,7 @@ export function KnowledgeWorkspace() {
         </label>}
         <div className="kw-hints"><span><MaterialIcon>lock</MaterialIcon>搜索结果与证据始终按当前文件权限读取</span><span>语义索引由用户对单份文件主动开启</span></div>
         <AiUsageBar />
+        <VectorHealthStrip />
       </div>
       <div className={`kw-layout ${selection ? 'kw-with-evidence' : ''}`}>
         <div className="kw-main">
