@@ -126,3 +126,13 @@
 .kw-rename-diff strong { font-size:13px; font-weight:650; }
 .kw-rename-buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
 .kw-rename-confirm { background:#246d54; color:white; }
+
+.kw-folder-choices { margin:12px 0; border:1px solid #d9e8e0; background:white;
+  border-radius:10px; max-height:190px; overflow-y:auto; padding:6px; }
+.kw-folder-option { display:flex; gap:9px; align-items:flex-start; padding:9px 8px;
+  border-bottom:1px solid #edf4f0; cursor:pointer; }
+.kw-folder-option:last-child { border-bottom:0; }
+.kw-folder-option input { margin-top:4px; flex-shrink:0; }
+.kw-folder-option span { display:flex; flex-direction:column; min-width:0; gap:3px; overflow-wrap:anywhere; }
+.kw-folder-option strong { font-size:12px; font-weight:650; }
+.kw-folder-option small { color:var(--kw-muted); font-size:11px; }

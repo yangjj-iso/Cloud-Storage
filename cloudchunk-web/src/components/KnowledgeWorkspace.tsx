@@ -6,6 +6,7 @@ import './knowledge-workspace.css';
 import { DirectAskPanel } from './DirectAskPanel';
 import { AiUsageBar } from './AiUsageBar';
 import { VectorHealthStrip } from './VectorHealthStrip';
+import { AiAgentHistory } from './AiAgentHistory';
 import { RenameAgentPanel } from './RenameAgentPanel';
 import { MoveAgentPanel } from './MoveAgentPanel';
 
@@ -158,6 +159,7 @@ export function KnowledgeWorkspace() {
       <div className={`kw-layout ${selection ? 'kw-with-evidence' : ''}`}>
         <div className="kw-main">
           <DirectAskPanel onSourceOpen={setSelection} />
+          <AiAgentHistory />
           <div className="kw-section-title">
             <div><h3>{searched ? '正文检索结果' : '我的文档资料'}</h3><p>{searched ? `查询：“${searched}”` : '支持 TXT、Markdown、文本型 PDF 和 DOCX'}</p></div>
             {searched ? <button className="kw-button" onClick={clearSearch}>返回资料</button>
