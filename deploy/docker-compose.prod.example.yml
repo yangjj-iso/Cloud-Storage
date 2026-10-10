@@ -1,0 +1,46 @@
+# Production overlay. Requires Docker Compose v2.24.4+ (!reset support).
+# Use together with base docker-compose.yml, populated env file and config_gate.py.
+# NEVER run base Compose by itself against production data: it exposes debug ports.
+services:
+  mysql:
+    image: ${CC_MYSQL_IMAGE:?pin_mysql_digest}
+    ports: !reset []
+  redis:
+    image: ${CC_REDIS_IMAGE:?pin_redis_digest}
+    ports: !reset []
+  rmq-namesrv:
+    image: ${CC_RMQ_IMAGE:?pin_rocketmq_digest}
+    ports: !reset []
+  rmq-broker:
+    image: ${CC_RMQ_IMAGE:?pin_rocketmq_digest}
+    ports: !reset []
+  rmq-dashboard:
+    image: ${CC_RMQ_DASHBOARD_IMAGE:?pin_dashboard_digest}
+    ports: !reset []
+  minio:
+    image: ${CC_MINIO_IMAGE:?pin_minio_digest}
+    ports: !reset []
+  qdrant:
+    image: ${CC_QDRANT_IMAGE:?pin_qdrant_digest}
+    ports: !reset []
+  api:
+    image: ${CLOUDCHUNK_API_IMAGE:?pin_backend_digest}
+    build: !reset null
+    ports: !reset []
+  worker:
+    image: ${CLOUDCHUNK_API_IMAGE:?pin_backend_digest}
+  web:
+    image: ${CLOUDCHUNK_WEB_IMAGE:?pin_frontend_digest}
+    build: !reset null
+    ports: !reset []
+    # Web served only on loopback; terminate TLS at a trusted reverse proxy.
+    ports: ["127.0.0.1:8088:80"]
+  jaeger:
+    image: ${CC_JAEGER_IMAGE:?pin_jaeger_digest}
+    ports: !reset []
+  prometheus:
+    image: ${CC_PROMETHEUS_IMAGE:?pin_prometheus_digest}
+    ports: !reset []
+  grafana:
+    image: ${CC_GRAFANA_IMAGE:?pin_grafana_digest}
+    ports: !reset []
