@@ -49,6 +49,8 @@ export interface RenameProposal {
 }
 export interface RenameApplyResult { proposalId: string; userFileId: string; newName: string; status: string }
 export interface MoveAgentCapabilities { enabled: boolean; operation: string }
+export interface FolderOption { id: number; name: string; parentId: number }
+export interface FolderChoices { folders: FolderOption[]; hasMore: boolean }
 export interface MoveProposal {
   id: string; userFileId: string; fileName: string;
   sourceParentId: number; destinationId: number; destinationName: string;
@@ -123,8 +125,10 @@ export const knowledgeApi = {
     request<RenameProposal[]>('/assistant/rename/recent',signal),
   moveAgentCapabilities: (signal: AbortSignal) =>
     request<MoveAgentCapabilities>('/assistant/move/capabilities',signal),
-  suggestMove: (source: SourceRef, consent: boolean, signal: AbortSignal) =>
-    request<MoveProposal>('/assistant/move/suggest',signal,{source,consent}),
+  folderChoices: (userFileId: string, signal: AbortSignal) =>
+    request<FolderChoices>('/assistant/move/folders?userFileId='+encodeURIComponent(userFileId),signal),
+  suggestMove: (source: SourceRef, candidateFolderIds: number[], consent: boolean, signal: AbortSignal) =>
+    request<MoveProposal>('/assistant/move/suggest',signal,{source,consent,candidateFolderIds}),
   applyMove: (id: string, confirmed: boolean, signal: AbortSignal) =>
     request<MoveApplyResult>('/assistant/move/'+encodeURIComponent(id)+'/apply',signal,{confirmed}),
   recentMoveProposals: (signal: AbortSignal) =>

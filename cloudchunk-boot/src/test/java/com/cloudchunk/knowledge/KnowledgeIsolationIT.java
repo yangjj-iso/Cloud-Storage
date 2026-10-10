@@ -356,7 +356,19 @@ class KnowledgeIsolationIT {
         verify(gateway,never()).completeWithUsage(anyString(),anyList());
         assertThrows(com.cloudchunk.common.exception.BizException.class,
             ()->agent.suggest(2,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(ref,true)));
-        var plan=agent.suggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(ref,true));
+        var choices=agent.folderChoices(1,101);
+        assertEquals(2,choices.folders().size(),"only user's own active folders can be offered");
+        assertTrue(choices.folders().stream().noneMatch(f->f.id()==203L));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            ()->agent.folderChoices(2,101));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            ()->agent.suggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(
+                ref,true,java.util.List.of(203L))));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            ()->agent.suggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(
+                ref,true,java.util.List.of(201L,201L))));
+        var plan=agent.suggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(
+            ref,true,java.util.List.of(201L,202L)));
         assertEquals(202,plan.destinationId());
         assertEquals("开发文档",plan.destinationName());
         assertEquals("PENDING",plan.status());
@@ -416,6 +428,44 @@ class KnowledgeIsolationIT {
         assertThrows(com.cloudchunk.common.exception.BizException.class,
             ()->tx.execute(txStatus->agent.apply(1,plan.id(),
                 new com.cloudchunk.core.knowledge.AiMoveAgentService.ApplyRequest(true))));
+        verifyNoInteractions(drive);
+    }
+    @Test void aiMoveRejectsSameNameFileAddedAfterSuggestion() {
+        var c=claim();publish(c,"Plain text about upload integrity");
+        jdbc.update("""
+            INSERT INTO user_file(id,user_id,parent_id,file_name,is_dir,status)
+            VALUES (201,1,0,'目标文件夹',1,0)
+            """);
+        var model=mock(com.cloudchunk.core.knowledge.ChatGateway.class);
+        when(model.configured()).thenReturn(true);
+        when(model.completeWithUsage(anyString(),anyList())).thenReturn(
+            new com.cloudchunk.core.knowledge.ChatGateway.Completion(
+                "1 [S1]",com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        var agent=new com.cloudchunk.core.knowledge.AiMoveAgentService(
+            jdbc,service,drive,model,mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class),
+            new com.fasterxml.jackson.databind.ObjectMapper(),
+            new org.springframework.mock.env.MockEnvironment()
+                .withProperty("cloudchunk.ai.agent.move-enabled","true"));
+        var source=new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",c.generation(),0);
+        var request=new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(
+            source,true,java.util.List.of(201L));
+        var proposal=agent.suggest(1,request);
+        // Another active sibling is created after user previews the proposed destination.
+        jdbc.update("""
+            INSERT INTO user_file(id,user_id,parent_id,file_id,file_name,is_dir,status)
+            VALUES (204,1,201,?,'Alice.txt',0,0)
+            """,FILE);
+        var conflict=assertThrows(com.cloudchunk.common.exception.BizException.class,
+            ()->tx.execute(status->agent.apply(1,proposal.id(),
+                new com.cloudchunk.core.knowledge.AiMoveAgentService.ApplyRequest(true))));
+        assertEquals(com.cloudchunk.common.exception.ErrorCode.INVALID_PARAMETER,conflict.getErrorCode());
+        verifyNoInteractions(drive);
+        assertEquals("PENDING",jdbc.queryForObject(
+            "SELECT status FROM ai_move_proposal WHERE id=?",String.class,proposal.id()));
+        assertEquals(0L,jdbc.queryForObject("SELECT parent_id FROM user_file WHERE id=101",Long.class));
+        // The model also cannot generate a fresh plan into an already conflicting folder.
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->agent.suggest(1,request));
         verifyNoInteractions(drive);
     }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {

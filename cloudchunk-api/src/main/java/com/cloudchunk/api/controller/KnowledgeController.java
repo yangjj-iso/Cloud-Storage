@@ -111,6 +111,11 @@ public class KnowledgeController {
         UserContext.requireUserId();
         return noStore(moveAgent.capabilities());
     }
+    @GetMapping("/assistant/move/folders")
+    public ResponseEntity<R<AiMoveAgentService.FolderChoices>> folderChoices(
+            @RequestParam long userFileId) {
+        return noStore(moveAgent.folderChoices(UserContext.requireUserId(),userFileId));
+    }
     @PostMapping("/assistant/move/suggest")
     public ResponseEntity<R<AiMoveAgentService.Proposal>> suggestMove(
             @RequestBody AiMoveAgentService.SuggestRequest request) {
