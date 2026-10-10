@@ -11,4 +11,9 @@ public final class KnowledgeModels {
                            int startOffset, int endOffset, String content, String status) {}
     public record SearchResult(List<Evidence> evidence, boolean hasMore, String mode) {}
     public record BlockPage(List<Evidence> blocks, boolean hasMore, int page) {}
+    public record SourceRef(String userFileId, long generation, int chunkIndex) {}
+    public record AnswerRequest(String question, List<SourceRef> sources, boolean consent) {}
+    public record CitedSource(String citationId, Evidence evidence) {}
+    public record AnswerResponse(String answer, List<CitedSource> citations, String mode) {}
+    public record AssistantCapabilities(boolean enabled, String retrievalMode) {}
 }
