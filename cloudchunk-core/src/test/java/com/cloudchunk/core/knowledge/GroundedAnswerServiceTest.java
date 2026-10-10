@@ -48,6 +48,9 @@ class GroundedAnswerServiceTest {
         when(gateway.complete(anyString(),anyList())).thenReturn("没有引用");
         assertEquals(ErrorCode.AI_UNGROUNDED,assertThrows(BizException.class,
                 () -> service.answer(7,request(true))).getErrorCode());
+        when(gateway.complete(anyString(),anyList())).thenReturn("无效零编号[S0]和有效编号[S1]");
+        assertEquals(ErrorCode.AI_UNGROUNDED,assertThrows(BizException.class,
+                () -> service.answer(7,request(true))).getErrorCode());
         when(gateway.complete(anyString(),anyList())).thenReturn("错误编号[S8]");
         assertEquals(ErrorCode.AI_UNGROUNDED,assertThrows(BizException.class,
                 () -> service.answer(7,request(true))).getErrorCode());

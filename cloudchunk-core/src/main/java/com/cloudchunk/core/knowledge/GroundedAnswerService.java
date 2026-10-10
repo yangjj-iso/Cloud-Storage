@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
 @Service
 public class GroundedAnswerService {
     private static final int MAX_SOURCES = 6;
-    private static final Pattern CITATION = Pattern.compile("\\[S([1-9][0-9]*)\\]");
+    private static final Pattern CITATION = Pattern.compile("\\[S([0-9]+)\\]");
     private final KnowledgeService knowledge;
     private final ChatGateway gateway;
     private final boolean enabled;
@@ -49,7 +49,7 @@ public class GroundedAnswerService {
         List<CitedSource> sources = new ArrayList<>();
         int n = 0;
         for (SourceRef ref : unique) {
-            if (ref.userFileId() == null || !ref.userFileId().matches("[0-9]{1,18}")) {
+            if (ref.userFileId() == null || !ref.userFileId().matches("[0-9]{1,19}")) {
                 throw BizException.of(ErrorCode.INVALID_PARAMETER, "invalid source");
             }
             long id;

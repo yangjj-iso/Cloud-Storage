@@ -59,15 +59,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         if (!cfg.isEnabled()) {
-            // Cluster-wide per-user burst guard for costly optional model calls.
-        if ("POST".equalsIgnoreCase(method) && "/api/v1/knowledge/assistant/answer".equals(path)) {
-            Long userId = UserContext.get();
-            if (userId == null) { rejectUnauthorized(response); return; }
-            if (!rateLimiter.tryAcquire("cc:rate:ai-answer:" + userId, 1, 2)) {
-                aiRejected.increment(); reject(response); return;
-            }
-        }
-        chain.doFilter(request, response);
+            chain.doFilter(request, response);
             return;
         }
 
@@ -107,6 +99,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 log.debug("rate-limit download userId={}", userId);
                 reject(response);
                 return;
+            }
+        }
+
+        // Cluster-wide per-user burst guard for costly optional model calls.
+        if ("POST".equalsIgnoreCase(method) && "/api/v1/knowledge/assistant/answer".equals(path)) {
+            Long userId = UserContext.get();
+            if (userId == null) { rejectUnauthorized(response); return; }
+            if (!rateLimiter.tryAcquire("cc:rate:ai-answer:" + userId, 1, 2)) {
+                aiRejected.increment(); reject(response); return;
             }
         }
 
