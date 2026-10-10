@@ -101,7 +101,7 @@ docker compose --env-file /etc/cloudchunk/production.env \
 
 健康预检的 HTTPS 入口必须是**仅受信任运维网络可访问的私有网关**，将 `/actuator/health` 与 `/api/v1/ping` 路由至后端 API；仓库自带 Web Nginx 只转发 `/api/`，不能直接将 Web 公网入口作为 `--health-base`。不要为了使检查通过而向公网开放 `/actuator/**`。
 
-GitHub `workflow_dispatch` 的 `live_readonly=true` 会在保护的 `production` Environment 下执行**只读** MySQL V13 和 HTTPS 健康预检；须在环境中提供 `RELEASE_MYSQL_HOST/PORT/USER/PASSWORD/DB` Secret（只读账号）及手动输入 `health_base`。该工作流没有生产部署/迁移权限。
+GitHub `workflow_dispatch` 的 `live_readonly=true` 会在保护的 `production` Environment 下执行**只读** MySQL V13 和 HTTPS 健康预检；须在环境中提供 `RELEASE_MYSQL_HOST/PORT/USER/PASSWORD/DB` Secret（只读账号）及手动输入 `health_base`。必须预先部署位于可信私有网络、带有 `cloudchunk-release` 标签的 Linux x64 self-hosted runner（预装 MySQL 8 CLI），防止为 GitHub 托管 Runner 将生产数据库暴露到公网。该工作流没有生产部署/迁移权限。
 
 ## 6. 回滚操作手册（人工审批、先选正确路径）
 
