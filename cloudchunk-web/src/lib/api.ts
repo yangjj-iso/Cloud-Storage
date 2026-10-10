@@ -112,6 +112,7 @@ const apiMessages: Record<number, string> = {
   300001: '文件不存在',
   300002: '文件已损坏',
   300003: '下载范围无效',
+  300004: '同一目录已有同名的文件或文件夹。请选择其他名称或位置，再重试。',
   400001: '转码记录不存在',
   400002: '文件正在转码中',
   500001: '存储服务暂不可用',
@@ -134,6 +135,14 @@ function authHeaders(): HeadersInit {
 export function getAuthHeader(): Record<string, string> {
   const token = authToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export interface DriveAuditEvent {
+  id: number;
+  operation: string;
+  success: boolean;
+  createdAt: string;
+  elapsedMs: number;
 }
 
 export const api = {
@@ -364,6 +373,13 @@ export const api = {
   },
 
   // ===== Drive (directory tree) =====
+  driveRecentAudit: async (): Promise<DriveAuditEvent[]> => {
+    const res = await fetch(`${API_BASE}/drive/audit/recent`, {
+      headers: authHeaders(), cache: 'no-store',
+    });
+    return parse<DriveAuditEvent[]>(res);
+  },
+
   driveList: async (parentId = 0): Promise<UserFileItem[]> => {
     const res = await fetch(`${API_BASE}/drive/list?parentId=${parentId}`, { headers: authHeaders() });
     return parse<UserFileItem[]>(res);
