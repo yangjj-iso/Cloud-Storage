@@ -553,6 +553,17 @@ class KnowledgeIsolationIT {
         assertThrows(com.cloudchunk.common.exception.BizException.class,()->tx.execute(t->
             agent.undo(1,plan.id(),new com.cloudchunk.core.knowledge.AiMoveAgentService.UndoRequest(true))));
         verify(drive,times(2)).move(eq(101L),eq(1L),anyLong());
+        // A later approved move is not undoable after another human modifies the name.
+        var next=agent.suggest(1,new com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest(
+            ref,true,java.util.List.of(201L)));
+        tx.executeWithoutResult(t->agent.apply(1,next.id(),
+            new com.cloudchunk.core.knowledge.AiMoveAgentService.ApplyRequest(true)));
+        jdbc.update("UPDATE user_file SET file_name='人工改过.txt' WHERE id=101");
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->tx.execute(t->
+            agent.undo(1,next.id(),new com.cloudchunk.core.knowledge.AiMoveAgentService.UndoRequest(true))));
+        assertEquals("APPLIED",jdbc.queryForObject(
+            "SELECT status FROM ai_move_proposal WHERE id=?",String.class,next.id()));
+        verify(drive,times(3)).move(eq(101L),eq(1L),anyLong());
     }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
