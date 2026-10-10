@@ -160,6 +160,7 @@ npm run dev
 - [受控 AI 文件归类 M2.9](./docs/20-ai-confirmed-move.md)：用户授权、已存在目录推荐、二次确认移动与权限回归。
 - [AI 整理体验 M3.0](./docs/21-ai-folder-shortlist-history.md)：自主选择文件夹候选、同名冲突预检与历史记录面板。
 - [AI 批量预览与条件撤销 M3.1](./docs/22-ai-batch-preview-and-undo.md)：最多四份文件批量建议、逐条批准与15分钟条件撤销。
+- [统一目录命名 M3.2](./docs/23-drive-sibling-name-invariants.md)：MySQL 活跃文件名唯一约束、冲突反馈、上传及转存重名后缀、并发回归。
 
 ## 验证
 
