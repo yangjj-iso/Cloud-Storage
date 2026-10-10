@@ -27,6 +27,22 @@ export function AiUsageBar() {
       <span>向量 <strong>{usage.embedding.used} / {usage.embedding.limit}</strong> 次</span>
       <span>UTC {usage.dayUtc} · 失败的模型请求也计入额度</span>
     </div> : <span className="kw-usage-hint">{error || '正在读取剩余额度…'}</span>}
-    <p>这里限制调用次数，不等于 Token 或金额结算；管理员还需配置模型服务的费用上限。</p>
+    {usage && <div className="kw-token-usage">
+      <span>已报告 Token：问答输入 {usage.chat.inputTokens.toLocaleString()} / 输出 {usage.chat.outputTokens.toLocaleString()}</span>
+      <span>Embedding 输入 {usage.embedding.inputTokens.toLocaleString()} Token</span>
+      <span>成功报告用量的次数：问答 {usage.chat.reportedCalls}/{usage.chat.used} · Embedding {usage.embedding.reportedCalls}/{usage.embedding.used}</span>
+      {(usage.chat.estimatedUsd !== null || usage.embedding.estimatedUsd !== null) &&
+        <span>按当前配置单价估算（USD）：
+          {usage.chat.estimatedUsd !== null ? ' 问答 
+  </div>;
+}
+ + usage.chat.estimatedUsd : ' 问答未知'}
+          {usage.embedding.estimatedUsd !== null ? ' · Embedding 
+  </div>;
+}
+ + usage.embedding.estimatedUsd : ' · Embedding 未知'}
+        </span>}
+    </div>}
+    <p>仅统计提供方报告的 Token；未报告或失败的调用不代表免费。估算并非实际账单或金额硬上限。</p>
   </div>;
 }

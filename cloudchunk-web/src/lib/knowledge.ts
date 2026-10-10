@@ -34,7 +34,11 @@ export interface VectorHealth {
   pendingDocuments: number;
   qdrantReachable: boolean;
 }
-export interface AiCallCounter { used: number; limit: number; remaining: number }
+export interface AiCallCounter {
+  used: number; limit: number; remaining: number;
+  reportedCalls: number; inputTokens: number; outputTokens: number;
+  estimatedUsd: string | null;
+}
 export interface AiUsageSnapshot { dayUtc: string; chat: AiCallCounter; embedding: AiCallCounter }
 export interface SemanticIndexStatus { status: 'NOT_REQUESTED' | 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'STALE'; completed: number; total: number }
 export interface SourceRef { userFileId: string; generation: number; chunkIndex: number }

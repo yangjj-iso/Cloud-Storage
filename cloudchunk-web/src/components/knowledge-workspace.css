@@ -112,3 +112,7 @@
 .kw-vector-health button { margin-left:auto; display:flex; padding:5px; border-radius:7px; }
 .kw-vector-health button:hover { background:#eaf2ed; }
 .kw-vector-health button .material-symbols-outlined { font-size:17px; }
+
+.kw-token-usage { display:flex; flex-wrap:wrap; gap:6px 18px; padding-top:10px; margin-top:10px;
+  border-top:1px solid #d9e8e0; font-size:11px; line-height:1.8; color:#526d61; }
+.kw-token-usage span { overflow-wrap:anywhere; }
