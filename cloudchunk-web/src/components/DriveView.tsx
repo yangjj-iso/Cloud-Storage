@@ -7,7 +7,7 @@ import { MaterialIcon } from './ui/MaterialIcon';
 import { formatZhDate } from '../lib/locale';
 
 export function DriveView() {
-  const { driveFiles, driveParentId, driveLoading, refreshDrive, driveMkdir, driveRename, driveMove, driveDelete, createShare, showToast, setView } = useAppStore();
+  const { driveFiles, driveParentId, driveLoading, refreshDrive, driveDelete, createShare, showToast, setView } = useAppStore();
   const [showMkdir, setShowMkdir] = useState(false);
   const [newDirName, setNewDirName] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
