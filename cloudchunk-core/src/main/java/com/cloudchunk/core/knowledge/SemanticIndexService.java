@@ -157,7 +157,9 @@ public class SemanticIndexService {
         // Shared content can reuse vectors, but only after this user opted in.
         boolean cached=existing.size()==1 && existing.getFirst()==provider.dimensions();
         if (!cached) budget.reserve(job.userId(),AiDailyCallBudget.Kind.EMBEDDING);
-        double[] vector=cached ? null : provider.embed(chunk.content());
+        EmbeddingGateway.Embedding computed=cached?null:provider.embedWithUsage(chunk.content());
+        if(computed!=null)budget.recordReported(job.userId(),AiDailyCallBudget.Kind.EMBEDDING,computed.usage());
+        double[] vector=computed==null?null:computed.vector();
         if(vector!=null && vector.length!=provider.dimensions())throw new IllegalArgumentException("wrong dimension");
         transaction.executeWithoutResult(s->publish(job,chunk.total(),vector));
     }

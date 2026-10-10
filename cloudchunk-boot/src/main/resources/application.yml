@@ -176,6 +176,10 @@ cloudchunk:
       # Hard per-user UTC-day attempted provider call ceilings (not token/dollar billing).
       chat-calls-per-day: ${AI_CHAT_CALLS_PER_DAY:20}
       embedding-calls-per-day: ${AI_EMBEDDING_CALLS_PER_DAY:100}
+      # Optional pricing estimates in USD per million tokens; absent = unknown, not free.
+      chat-input-usd-per-million: ${AI_CHAT_INPUT_USD_PER_MILLION:}
+      chat-output-usd-per-million: ${AI_CHAT_OUTPUT_USD_PER_MILLION:}
+      embedding-input-usd-per-million: ${AI_EMBEDDING_INPUT_USD_PER_MILLION:}
     embedding:
       enabled: ${AI_EMBEDDING_ENABLED:false}
       endpoint: ${AI_EMBEDDING_ENDPOINT:}

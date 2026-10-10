@@ -10,6 +10,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 
 /**
@@ -20,19 +22,27 @@ import java.util.List;
 @Service
 public class AiDailyCallBudget {
     public enum Kind { CHAT, EMBEDDING }
-    public record Counter(int used, int limit, int remaining) {}
+    public record Counter(int used,int limit,int remaining,long reportedCalls,
+                          long inputTokens,long outputTokens,String estimatedUsd) {}
     public record Snapshot(String dayUtc, Counter chat, Counter embedding) {}
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
     private final int chatLimit;
     private final int embeddingLimit;
+    // Nullable rates mean "unknown", never silently zero-cost.
+    private final BigDecimal chatInputUsdPerMillion;
+    private final BigDecimal chatOutputUsdPerMillion;
+    private final BigDecimal embeddingInputUsdPerMillion;
 
     public AiDailyCallBudget(JdbcTemplate jdbc, PlatformTransactionManager manager, Environment env) {
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(manager);
         this.chatLimit = Math.max(0, env.getProperty("cloudchunk.ai.budget.chat-calls-per-day", Integer.class, 20));
         this.embeddingLimit = Math.max(0, env.getProperty("cloudchunk.ai.budget.embedding-calls-per-day", Integer.class, 100));
+        this.chatInputUsdPerMillion=rate(env,"cloudchunk.ai.budget.chat-input-usd-per-million");
+        this.chatOutputUsdPerMillion=rate(env,"cloudchunk.ai.budget.chat-output-usd-per-million");
+        this.embeddingInputUsdPerMillion=rate(env,"cloudchunk.ai.budget.embedding-input-usd-per-million");
     }
 
     public Snapshot snapshot(long userId) {
@@ -83,14 +93,49 @@ public class AiDailyCallBudget {
         }
     }
 
+    /** Called after a successful provider response, even if later citation validation fails. */
+    public void recordReported(long userId, Kind kind, ModelTokenUsage usage) {
+        if(usage==null || !usage.reported())return; // unknown usage is not free usage
+        if(usage.inputTokens()<0 || usage.outputTokens()<0 ||
+           usage.inputTokens()>100_000_000L || usage.outputTokens()>100_000_000L)
+            throw new IllegalArgumentException("invalid token count");
+        int updated=jdbc.update("""
+            UPDATE ai_model_daily_usage SET
+              usage_reported_calls=usage_reported_calls+1,
+              input_tokens=input_tokens+?,output_tokens=output_tokens+?
+            WHERE user_id=? AND usage_date=? AND model_kind=?
+            """,usage.inputTokens(),usage.outputTokens(),userId,
+            LocalDate.now(ZoneOffset.UTC),kind.name());
+        if(updated!=1)throw new IllegalStateException("model call was not reserved");
+    }
+
+    private static BigDecimal rate(Environment env,String key) {
+        String raw=env.getProperty(key,"").strip();
+        if(raw.isBlank())return null;
+        BigDecimal value=new BigDecimal(raw);
+        if(value.signum()<0 || value.compareTo(new BigDecimal("1000000"))>0)
+            throw new IllegalArgumentException("invalid configured model price");
+        return value;
+    }
+
+    private String estimate(Kind kind,long input,long output) {
+        BigDecimal in=kind==Kind.CHAT?chatInputUsdPerMillion:embeddingInputUsdPerMillion;
+        BigDecimal out=kind==Kind.CHAT?chatOutputUsdPerMillion:BigDecimal.ZERO;
+        if(in==null || out==null)return null;
+        return in.multiply(BigDecimal.valueOf(input)).add(out.multiply(BigDecimal.valueOf(output)))
+            .divide(BigDecimal.valueOf(1_000_000),6,RoundingMode.HALF_UP).toPlainString();
+    }
+
     private Counter counter(long userId, Kind kind, LocalDate day) {
         int max = limit(kind);
-        List<Integer> rows = jdbc.query("""
-            SELECT used_calls FROM ai_model_daily_usage
-            WHERE user_id=? AND usage_date=? AND model_kind=?
-            """, (rs, i) -> rs.getInt(1), userId, day, kind.name());
-        int used = rows.isEmpty() ? 0 : rows.getFirst();
-        return new Counter(used, max, Math.max(0, max-used));
+        List<long[]> rows=jdbc.query("""
+            SELECT used_calls,usage_reported_calls,input_tokens,output_tokens
+            FROM ai_model_daily_usage WHERE user_id=? AND usage_date=? AND model_kind=?
+            """,(rs,i)->new long[]{rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getLong(4)},
+            userId,day,kind.name());
+        long[] row=rows.isEmpty()?new long[]{0,0,0,0}:rows.getFirst();
+        return new Counter((int)row[0],max,Math.max(0,max-(int)row[0]),
+            row[1],row[2],row[3],estimate(kind,row[2],row[3]));
     }
 
     private int limit(Kind kind) { return kind == Kind.CHAT ? chatLimit : embeddingLimit; }

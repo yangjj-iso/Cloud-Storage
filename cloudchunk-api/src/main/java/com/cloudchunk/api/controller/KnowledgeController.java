@@ -10,6 +10,7 @@ import com.cloudchunk.core.knowledge.HybridSearchService;
 import com.cloudchunk.core.knowledge.AutoAnswerService;
 import com.cloudchunk.core.knowledge.AiDailyCallBudget;
 import com.cloudchunk.core.knowledge.QdrantMirrorService;
+import com.cloudchunk.api.monitoring.KnowledgeRetrievalMetrics;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,10 +26,11 @@ public class KnowledgeController {
     private final AutoAnswerService autoAnswer;
     private final AiDailyCallBudget budget;
     private final QdrantMirrorService mirror;
+    private final KnowledgeRetrievalMetrics retrievalMetrics;
     public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
                                SemanticIndexService semantic, HybridSearchService hybrid,
                                AutoAnswerService autoAnswer, AiDailyCallBudget budget,
-                               QdrantMirrorService mirror) {
+                               QdrantMirrorService mirror,KnowledgeRetrievalMetrics retrievalMetrics) {
         this.service = service;
         this.assistant = assistant;
         this.semantic = semantic;
@@ -36,6 +38,7 @@ public class KnowledgeController {
         this.autoAnswer = autoAnswer;
         this.budget = budget;
         this.mirror = mirror;
+        this.retrievalMetrics=retrievalMetrics;
     }
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
@@ -47,7 +50,8 @@ public class KnowledgeController {
     }
     @PostMapping("/search")
     public ResponseEntity<R<SearchResult>> search(@RequestBody SearchRequest request) {
-        return noStore(service.search(UserContext.requireUserId(), request.query()));
+        long userId=UserContext.requireUserId();
+        return noStore(retrievalMetrics.measure("keyword",()->service.search(userId,request.query())));
     }
     @GetMapping("/documents/{id}/blocks")
     public ResponseEntity<R<BlockPage>> blocks(@PathVariable long id, @RequestParam long generation,
@@ -87,7 +91,9 @@ public class KnowledgeController {
     }
     @PostMapping("/semantic/search")
     public ResponseEntity<R<SearchResult>> semanticSearch(@RequestBody SemanticSearchRequest request) {
-        return noStore(hybrid.search(UserContext.requireUserId(),request.query(),request.consent()));
+        long userId=UserContext.requireUserId();
+        return noStore(retrievalMetrics.measure("hybrid",
+            ()->hybrid.search(userId,request.query(),request.consent())));
     }
     @PostMapping("/documents/{id}/semantic-index")
     public ResponseEntity<R<SemanticIndexService.Status>> semanticIndex(@PathVariable long id,

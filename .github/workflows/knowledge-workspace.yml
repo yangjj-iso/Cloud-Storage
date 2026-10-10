@@ -23,6 +23,16 @@ jobs:
           cache: maven
       - name: Verify backend and real MySQL / Redis integration tests
         run: mvn -B verify
+  retrieval-evaluator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Chinese retrieval evaluator
+        run: python3 -m unittest discover -s evaluation/tests -v
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 10
