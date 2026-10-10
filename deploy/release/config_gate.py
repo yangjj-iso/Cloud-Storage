@@ -119,7 +119,9 @@ def check_compose(config):
     for name, service in services.items():
         if not isinstance(service, dict):
             raise GateError("invalid Compose service: " + name)
-        if service.get("network_mode") == "host" or service.get("privileged"):\n            raise GateError(name + " cannot use host network or privileged mode")\n        image = service.get("image", "")
+        if service.get("network_mode") == "host" or service.get("privileged"):
+            raise GateError(name + " cannot use host network or privileged mode")
+        image = service.get("image", "")
         if not isinstance(image, str) or not DIGEST.search(image) or service.get("build"):
             raise GateError(name + " image must be immutable by sha256 digest; no builds")
         for port in service.get("ports") or []:
