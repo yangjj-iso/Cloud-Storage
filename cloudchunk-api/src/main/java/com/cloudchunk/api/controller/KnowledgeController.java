@@ -10,6 +10,7 @@ import com.cloudchunk.core.knowledge.HybridSearchService;
 import com.cloudchunk.core.knowledge.AutoAnswerService;
 import com.cloudchunk.core.knowledge.AiDailyCallBudget;
 import com.cloudchunk.core.knowledge.QdrantMirrorService;
+import com.cloudchunk.core.knowledge.AiRenameAgentService;
 import com.cloudchunk.api.monitoring.KnowledgeRetrievalMetrics;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
@@ -26,11 +27,13 @@ public class KnowledgeController {
     private final AutoAnswerService autoAnswer;
     private final AiDailyCallBudget budget;
     private final QdrantMirrorService mirror;
+    private final AiRenameAgentService renameAgent;
     private final KnowledgeRetrievalMetrics retrievalMetrics;
     public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
                                SemanticIndexService semantic, HybridSearchService hybrid,
                                AutoAnswerService autoAnswer, AiDailyCallBudget budget,
-                               QdrantMirrorService mirror,KnowledgeRetrievalMetrics retrievalMetrics) {
+                               QdrantMirrorService mirror,KnowledgeRetrievalMetrics retrievalMetrics,
+                               AiRenameAgentService renameAgent) {
         this.service = service;
         this.assistant = assistant;
         this.semantic = semantic;
@@ -39,6 +42,7 @@ public class KnowledgeController {
         this.budget = budget;
         this.mirror = mirror;
         this.retrievalMetrics=retrievalMetrics;
+        this.renameAgent=renameAgent;
     }
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
@@ -79,6 +83,25 @@ public class KnowledgeController {
     @PostMapping("/assistant/ask")
     public ResponseEntity<R<AutoAskResponse>> autoAsk(@RequestBody AutoAskRequest request) {
         return noStore(autoAnswer.ask(UserContext.requireUserId(), request));
+    }
+    @GetMapping("/assistant/rename/capabilities")
+    public ResponseEntity<R<AiRenameAgentService.Capabilities>> renameCapabilities() {
+        UserContext.requireUserId();
+        return noStore(renameAgent.capabilities());
+    }
+    @PostMapping("/assistant/rename/suggest")
+    public ResponseEntity<R<AiRenameAgentService.Proposal>> suggestRename(
+            @RequestBody AiRenameAgentService.SuggestRequest request) {
+        return noStore(renameAgent.suggest(UserContext.requireUserId(),request));
+    }
+    @PostMapping("/assistant/rename/{id}/apply")
+    public ResponseEntity<R<AiRenameAgentService.ApplyResult>> applyRename(
+            @PathVariable String id,@RequestBody AiRenameAgentService.ApplyRequest request) {
+        return noStore(renameAgent.apply(UserContext.requireUserId(),id,request));
+    }
+    @GetMapping("/assistant/rename/recent")
+    public ResponseEntity<R<java.util.List<AiRenameAgentService.Proposal>>> recentRenames() {
+        return noStore(renameAgent.recent(UserContext.requireUserId()));
     }
     @GetMapping("/semantic/health")
     public ResponseEntity<R<QdrantMirrorService.MirrorHealth>> semanticHealth() {

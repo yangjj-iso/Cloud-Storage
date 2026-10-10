@@ -164,6 +164,9 @@ cloudchunk:
     batch-size: 500
     max-batches-per-run: 20
   ai:
+    agent:
+      # M2.8 starts with human-approved rename only; no autonomous file writes.
+      rename-enabled: ${AI_AGENT_RENAME_ENABLED:false}
     qdrant:
       enabled: ${AI_QDRANT_ENABLED:false}
       url: ${AI_QDRANT_URL:}
