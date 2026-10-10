@@ -48,6 +48,13 @@ export interface RenameProposal {
   status: 'PENDING' | 'APPLIED';
 }
 export interface RenameApplyResult { proposalId: string; userFileId: string; newName: string; status: string }
+export interface MoveAgentCapabilities { enabled: boolean; operation: string }
+export interface MoveProposal {
+  id: string; userFileId: string; fileName: string;
+  sourceParentId: number; destinationId: number; destinationName: string;
+  expiresAt: string; status: 'PENDING' | 'APPLIED';
+}
+export interface MoveApplyResult { proposalId: string; userFileId: string; destinationId: number; status: string }
 export interface AnswerResponse {
   answer: string;
   citations: { citationId: string; evidence: Evidence }[];
@@ -114,6 +121,14 @@ export const knowledgeApi = {
     request<RenameApplyResult>('/assistant/rename/'+encodeURIComponent(id)+'/apply',signal,{confirmed}),
   recentRenameProposals: (signal: AbortSignal) =>
     request<RenameProposal[]>('/assistant/rename/recent',signal),
+  moveAgentCapabilities: (signal: AbortSignal) =>
+    request<MoveAgentCapabilities>('/assistant/move/capabilities',signal),
+  suggestMove: (source: SourceRef, consent: boolean, signal: AbortSignal) =>
+    request<MoveProposal>('/assistant/move/suggest',signal,{source,consent}),
+  applyMove: (id: string, confirmed: boolean, signal: AbortSignal) =>
+    request<MoveApplyResult>('/assistant/move/'+encodeURIComponent(id)+'/apply',signal,{confirmed}),
+  recentMoveProposals: (signal: AbortSignal) =>
+    request<MoveProposal[]>('/assistant/move/recent',signal),
   autoAsk: (question: string, consent: boolean, signal: AbortSignal) =>
     request<AutoAskResponse>('/assistant/ask', signal, { question, consent }),
   answer: (question: string, sources: SourceRef[], consent: boolean, signal: AbortSignal) =>
