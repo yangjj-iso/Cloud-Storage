@@ -115,7 +115,10 @@ def env_override(values, target):
 
 
 def assert_only_image_changes(before, after, target):
-    config_gate.check_compose(after)
+    try:
+        config_gate.check_compose(after)
+    except config_gate.GateError as exc:
+        raise RollbackError("production configuration rejected during rollback") from exc
     changed = copy.deepcopy(before)
     for service, key in (("api", "backend_image"), ("worker", "backend_image"),
                          ("web", "web_image")):
