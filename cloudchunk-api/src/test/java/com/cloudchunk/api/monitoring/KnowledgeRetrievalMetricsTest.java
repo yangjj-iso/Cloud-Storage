@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class KnowledgeRetrievalMetricsTest {
     @Test void recordsOnlyBoundedModesEvenWhenSearchFails() {
-        try(var registry=new SimpleMeterRegistry()) {
+        var registry=new SimpleMeterRegistry();
             var metrics=new KnowledgeRetrievalMetrics(registry);
             assertEquals("ok",metrics.measure("keyword",()->"ok"));
             assertThrows(IllegalStateException.class,
@@ -17,6 +17,6 @@ class KnowledgeRetrievalMetricsTest {
                 .tag("mode","hybrid").timer().count());
             assertThrows(IllegalArgumentException.class,
                 ()->metrics.measure("document-content-secret",()->"not run"));
-        }
+        registry.close();
     }
 }
