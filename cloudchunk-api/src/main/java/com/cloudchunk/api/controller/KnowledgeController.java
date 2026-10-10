@@ -116,6 +116,16 @@ public class KnowledgeController {
             @RequestParam long userFileId) {
         return noStore(moveAgent.folderChoices(UserContext.requireUserId(),userFileId));
     }
+    @PostMapping("/assistant/move/batch/suggest")
+    public ResponseEntity<R<AiMoveAgentService.BatchPreview>> batchSuggestMoves(
+            @RequestBody AiMoveAgentService.BatchSuggestRequest request) {
+        return noStore(moveAgent.batchSuggest(UserContext.requireUserId(),request));
+    }
+    @PostMapping("/assistant/move/{id}/undo")
+    public ResponseEntity<R<AiMoveAgentService.UndoResult>> undoMove(
+            @PathVariable String id,@RequestBody AiMoveAgentService.UndoRequest request) {
+        return noStore(moveAgent.undo(UserContext.requireUserId(),id,request));
+    }
     @PostMapping("/assistant/move/suggest")
     public ResponseEntity<R<AiMoveAgentService.Proposal>> suggestMove(
             @RequestBody AiMoveAgentService.SuggestRequest request) {
