@@ -102,7 +102,7 @@ jobs:
     name: protected production read-only gate
     if: github.event_name == 'workflow_dispatch' && inputs.live_readonly
     needs: [static-release, build-verification, docker-restore-drill]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, cloudchunk-release]
     timeout-minutes: 10
     environment: production
     env:
@@ -116,8 +116,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install database client
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq default-mysql-client
+      - name: Require local MySQL 8 client on trusted private runner
+        run: command -v mysql
       - name: Enforce explicit HTTPS health endpoint and protected DB inputs
         shell: bash
         run: |
