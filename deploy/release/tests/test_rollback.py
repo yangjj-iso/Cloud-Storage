@@ -64,7 +64,7 @@ class RollbackTest(unittest.TestCase):
     def test_denies_rollback_without_valid_ticket_before_running_docker(self):
         with self.assertRaises(rollback.RollbackError):
             rollback.apply(self.current,self.target,self.backup,"/does-not-exist",
-                           "/tmp/unused-audit","bad")
+                           "/tmp/unused-audit","bad","https://ops.example.com")
 
     def test_audit_is_exclusive_and_no_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:

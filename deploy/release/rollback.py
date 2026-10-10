@@ -19,6 +19,9 @@ import tempfile
 import config_gate
 import snapshot
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "preflight"))
+import check_release
+
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / "deploy/docker-compose.yml"
 OVERLAY = ROOT / "deploy/docker-compose.prod.example.yml"
@@ -145,9 +148,13 @@ def append_event(path, event):
         handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def apply(current, target, backup, env_file, audit_path, ticket, runner=run):
+def apply(current, target, backup, env_file, audit_path, ticket, health_base, runner=run, health_check=None):
     if not TICKET.fullmatch(ticket):
         raise RollbackError("invalid change ticket identifier")
+    if not health_base:
+        raise RollbackError("private HTTPS health gateway is required after rollback")
+    if health_check is None:
+        health_check = check_release.check_health
     assert_compatible(current, target, backup)
     config_gate.check_private_env_file(env_file)
     values = config_gate.load_env(env_file)
@@ -178,11 +185,15 @@ def apply(current, target, backup, env_file, audit_path, ticket, runner=run):
                                       ("cc-web", target["web_image"])):
                 if runner(["docker", "inspect", "--format", "{{.Config.Image}}", container]) != image:
                     raise RollbackError("rollback image verification failed")
+            try:
+                health_check(health_base)
+            except (check_release.PreflightError, OSError) as exc:
+                raise RollbackError("rollback HTTP health check failed; manual intervention required") from exc
             append_event(audit_path, {"event": "ROLLBACK_IMAGE_APPLIED",
                                       "at_utc": datetime.now(timezone.utc).isoformat()})
             return {"status": "IMAGES_APPLIED", "ticket": ticket,
                     "target_release_sha": target["release_sha"],
-                    "health": "NOT_CHECKED", "database_restore": False}
+                    "health": "VERIFIED", "database_restore": False}
         except RollbackError:
             append_event(audit_path, {"event": "ROLLBACK_INCOMPLETE",
                                       "at_utc": datetime.now(timezone.utc).isoformat()})
@@ -199,6 +210,7 @@ def main(argv=None):
     parser.add_argument("--ack", default="")
     parser.add_argument("--approved-ticket", default="")
     parser.add_argument("--audit-file")
+    parser.add_argument("--health-base", help="private HTTPS health gateway, required for --apply")
     args = parser.parse_args(argv)
     try:
         current = read_release(args.current_release)
@@ -210,7 +222,7 @@ def main(argv=None):
                 raise RollbackError("explicit compatibility ack and new audit file are required")
             # The approval ticket must be verified externally; these flags are not identity proof.
             outcome = apply(current, target, backup, args.env_file,
-                            args.audit_file, args.approved_ticket)
+                            args.audit_file, args.approved_ticket, args.health_base)
         else:
             outcome = plan
         print(json.dumps(outcome, ensure_ascii=False))

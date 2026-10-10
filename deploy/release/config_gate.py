@@ -84,6 +84,8 @@ def check_env(values, production=False):
     if (len(values.get("METRICS_SCRAPE_TOKEN", "")) < 32 or
             values.get("METRICS_SCRAPE_TOKEN", "").lower() in BAD_SECRETS):
         raise GateError("METRICS_SCRAPE_TOKEN is missing or weak")
+    if len(values.get("GRAFANA_ADMIN_PASSWORD", "")) < 16 or values.get("GRAFANA_ADMIN_PASSWORD", "").lower() in BAD_SECRETS:
+        raise GateError("GRAFANA_ADMIN_PASSWORD is missing or weak")
     if values.get("PROMETHEUS_PUBLIC", "false").lower() != "false":
         raise GateError("PROMETHEUS_PUBLIC must be false")
     if values.get("CROSS_USER_DEDUP_ENABLED", "false").lower() != "false":
@@ -163,8 +165,10 @@ def main(argv=None):
     parser.add_argument("--compose-config", help="path to resolved Compose JSON, or '-' for stdin")
     args = parser.parse_args(argv)
     try:
-        values = load_env(args.env_file)
         prod = args.mode == "production"
+        if prod:
+            check_private_env_file(args.env_file)
+        values = load_env(args.env_file)
         check_env(values, prod)
         if prod:
             if not args.compose_config:

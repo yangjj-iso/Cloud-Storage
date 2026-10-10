@@ -48,3 +48,6 @@ services:
   grafana:
     image: ${CC_GRAFANA_IMAGE:?pin_grafana_digest}
     ports: !reset []
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?provide_private_password}

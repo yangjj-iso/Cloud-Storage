@@ -58,7 +58,8 @@ jobs:
           trap 'rm -f "$tmp" "$tokenfile"' EXIT
           printf '%s' "$token" > "$tokenfile"
           chmod 600 "$tokenfile"
-          printf 'METRICS_SCRAPE_TOKEN=%s\\nMETRICS_TOKEN_FILE=%s\\n' "$token" "$tokenfile" >> "$tmp"
+          printf 'METRICS_SCRAPE_TOKEN=%s\nMETRICS_TOKEN_FILE=%s\n' "$token" "$tokenfile" >> "$tmp"
+          printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "strong-ci-grafana-password-12345" >> "$tmp"
           digest="$(printf 'a%.0s' {1..64})"
           for key in CLOUDCHUNK_API_IMAGE CLOUDCHUNK_WEB_IMAGE CC_MYSQL_IMAGE CC_REDIS_IMAGE CC_RMQ_IMAGE CC_RMQ_DASHBOARD_IMAGE CC_MINIO_IMAGE CC_QDRANT_IMAGE CC_JAEGER_IMAGE CC_PROMETHEUS_IMAGE CC_GRAFANA_IMAGE; do
             printf '%s=registry.invalid/%s@sha256:%s\n' "$key" "${key,,}" "$digest" >> "$tmp"

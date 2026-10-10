@@ -22,6 +22,7 @@ class ConfigGateTest(unittest.TestCase):
             "MINIO_ROOT_USER": "cloudchunk-storage",
             "WS_ALLOWED_ORIGINS": "https://files.example.com",
             "PROMETHEUS_PUBLIC": "false",
+            "GRAFANA_ADMIN_PASSWORD": "strong-ci-grafana-password-12345",
             "METRICS_SCRAPE_TOKEN": "sample-scrape-only-ci-token-long-12345",
             "METRICS_TOKEN_FILE": str(self.token_file),
         }
@@ -46,7 +47,8 @@ class ConfigGateTest(unittest.TestCase):
                            ("MINIO_ROOT_PASSWORD", "minioadmin"),
                            ("WS_ALLOWED_ORIGINS", "http://example.com"),
                            ("WS_ALLOWED_ORIGINS", "https://*.example.com"),
-                           ("PROMETHEUS_PUBLIC", "true")]:
+                           ("PROMETHEUS_PUBLIC", "true"),
+                           ("GRAFANA_ADMIN_PASSWORD", "admin")]:
             with self.subTest(key=key, value=value):
                 with self.assertRaises(gate.GateError):
                     gate.check_env({**self.good, key: value}, production=True)
