@@ -4,16 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Qdrant is a disposable derived mirror of authorized MySQL READY vectors. */
-@Component
-@ConditionalOnProperty(name="cloudchunk.runtime.worker-enabled",havingValue="true",matchIfMissing=true)
+@Service
 public class QdrantMirrorService {
     private static final Logger log=LoggerFactory.getLogger(QdrantMirrorService.class);
     private final JdbcTemplate jdbc;
@@ -48,7 +45,6 @@ public class QdrantMirrorService {
             """,(rs,n)->new long[]{rs.getLong(1),rs.getLong(2)},userId,embedding.modelKey());
         return !rows.isEmpty() && rows.getFirst()[0]>0 && rows.getFirst()[1]==0;
     }
-    @Scheduled(fixedDelayString="${cloudchunk.ai.qdrant.sync-interval-ms:15000}",initialDelay=20000)
     public void syncTick() {
         if(!enabled())return;
         try{syncOne();}
@@ -97,7 +93,6 @@ public class QdrantMirrorService {
             job.fileId(),job.userId());
     }
     /** Eventually purge Qdrant vectors for revoked/deleted/stale documents. */
-    @Scheduled(fixedDelayString="${cloudchunk.ai.qdrant.prune-interval-ms:90000}",initialDelay=45000)
     public void pruneTick() {
         if(!enabled())return;
         try{pruneOne();}
