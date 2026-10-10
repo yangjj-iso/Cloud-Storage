@@ -73,7 +73,7 @@ jobs:
 
       - name: Validate Prometheus alert rule syntax
         run: |
-          docker run --rm -v "$PWD/deploy/observability/rules:/rules:ro" prom/prometheus:v2.55.1 promtool check rules /rules/cloudchunk-alerts.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/observability/rules:/rules:ro" prom/prometheus:v2.55.1 check rules /rules/cloudchunk-alerts.yml
 
   build-verification:
     name: backend and frontend build
