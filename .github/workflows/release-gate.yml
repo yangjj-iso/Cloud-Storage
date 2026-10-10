@@ -1,0 +1,129 @@
+name: M3.5 release gates
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      live_readonly:
+        description: "Run production read-only DB + HTTPS health gate (requires protected environment and secrets)"
+        type: boolean
+        required: true
+        default: false
+      health_base:
+        description: "Production HTTPS base URL (only for live_readonly; no credentials)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-release:
+    name: config and backup contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check sample env (must not be treated as production credentials)
+        run: python3 deploy/release/config_gate.py --mode example --env-file deploy/.env.example
+      - name: Check release, backup and restore unit tests
+        run: python3 -m unittest discover -s deploy/release/tests -v
+      - name: Existing migration and smoke contract tests
+        run: python3 -m unittest discover -s deploy/preflight/tests -v
+      - name: Validate Compose syntax, all optional profiles
+        run: docker compose --profile app --profile vector --profile observability -f deploy/docker-compose.yml --env-file deploy/.env.example config --quiet
+
+      - name: Validate production overlay with fake CI-only credentials and pinned image refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          printf '%s\n' 'MYSQL_ROOT_PASSWORD=ci-only-not-a-real-password-123' 'MINIO_ROOT_PASSWORD=separate-ci-not-a-real-password-456' 'MINIO_ROOT_USER=ci-storage' 'WS_ALLOWED_ORIGINS=https://test.example.com' > "$tmp"
+          digest="$(printf 'a%.0s' {1..64})"
+          for key in CLOUDCHUNK_API_IMAGE CLOUDCHUNK_WEB_IMAGE CC_MYSQL_IMAGE CC_REDIS_IMAGE CC_RMQ_IMAGE CC_RMQ_DASHBOARD_IMAGE CC_MINIO_IMAGE CC_QDRANT_IMAGE CC_JAEGER_IMAGE CC_PROMETHEUS_IMAGE CC_GRAFANA_IMAGE; do
+            printf '%s=registry.invalid/%s@sha256:%s\n' "$key" "${key,,}" "$digest" >> "$tmp"
+          done
+          docker compose --env-file "$tmp" -f deploy/docker-compose.yml -f deploy/docker-compose.prod.example.yml --profile app --profile vector --profile observability config --format json |
+            python3 deploy/release/config_gate.py --mode production --env-file "$tmp" --compose-config -
+
+  build-verification:
+    name: backend and frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - run: mvn -B verify
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudchunk-web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: cloudchunk-web
+      - run: python3 -m unittest discover -s evaluation/tests -v
+
+  docker-restore-drill:
+    name: isolated Docker restore smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify disposable Docker is available
+        run: docker info
+      - name: Restore synthetic SQL and cold volumes in isolated disposable Docker
+        run: python3 -m unittest discover -s deploy/release/docker_tests -v
+
+  # This job is opt-in and cannot deploy, migrate, back up or alter production.
+  # Configure GitHub environment "production" with required reviewers and restrict refs.
+  live-readonly:
+    name: protected production read-only gate
+    if: github.event_name == 'workflow_dispatch' && inputs.live_readonly
+    needs: [static-release, build-verification, docker-restore-drill]
+    runs-on: [self-hosted, linux, x64, cloudchunk-release]
+    timeout-minutes: 10
+    environment: production
+    env:
+      MYSQL_HOST: ${{ secrets.RELEASE_MYSQL_HOST }}
+      MYSQL_PORT: ${{ secrets.RELEASE_MYSQL_PORT }}
+      MYSQL_USER: ${{ secrets.RELEASE_MYSQL_USER }}
+      MYSQL_PASSWORD: ${{ secrets.RELEASE_MYSQL_PASSWORD }}
+      MYSQL_DB: ${{ secrets.RELEASE_MYSQL_DB }}
+      RELEASE_HEALTH_BASE: ${{ inputs.health_base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require local MySQL 8 client on trusted private runner
+        run: command -v mysql
+      - name: Enforce explicit HTTPS health endpoint and protected DB inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$MYSQL_HOST" && test -n "$MYSQL_USER" && test -n "$MYSQL_PASSWORD" && test -n "$MYSQL_DB"
+          test -n "$RELEASE_HEALTH_BASE"
+          python3 -c 'import os,sys; from urllib.parse import urlsplit; p=urlsplit(os.environ["RELEASE_HEALTH_BASE"]); sys.exit(0 if p.scheme=="https" and p.hostname and not (p.username or p.password or p.path not in ("","/") or p.query or p.fragment) else 1)'
+      - name: Run live read-only V13 + HTTP readiness gate
+        run: python3 deploy/preflight/check_release.py --phase ready --health-base "$RELEASE_HEALTH_BASE"
