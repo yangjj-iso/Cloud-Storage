@@ -19,7 +19,7 @@ class GroundedAnswerServiceTest {
     private static GroundedAnswerService assistant(KnowledgeService knowledge, ChatGateway gateway,boolean on) {
         Environment env = mock(Environment.class);
         when(env.getProperty("cloudchunk.ai.chat.enabled","false")).thenReturn(String.valueOf(on));
-        return new GroundedAnswerService(knowledge,gateway,env);
+        return new GroundedAnswerService(knowledge,gateway,env,mock(AiDailyCallBudget.class));
     }
     @Test void disabledDoesNotReadOrCallTheModel() {
         var knowledge=mock(KnowledgeService.class);var gateway=mock(ChatGateway.class);

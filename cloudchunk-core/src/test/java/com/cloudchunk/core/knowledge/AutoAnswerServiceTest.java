@@ -13,7 +13,8 @@ import static org.mockito.Mockito.*;
 class AutoAnswerServiceTest {
     private final HybridSearchService search = mock(HybridSearchService.class);
     private final GroundedAnswerService answer = mock(GroundedAnswerService.class);
-    private final AutoAnswerService auto = new AutoAnswerService(search, answer);
+    private final AiDailyCallBudget budget = mock(AiDailyCallBudget.class);
+    private final AutoAnswerService auto = new AutoAnswerService(search, answer, budget);
 
     @Test void disabledOrUnconsentedNeverSearchesOrCallsModel() {
         when(answer.capabilities()).thenReturn(new AssistantCapabilities(false,"SELECTED_KEYWORD_EVIDENCE"));
