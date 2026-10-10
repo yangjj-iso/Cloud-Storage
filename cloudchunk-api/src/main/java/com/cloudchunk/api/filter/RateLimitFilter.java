@@ -111,6 +111,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
         }
 
+        if ("POST".equalsIgnoreCase(method) &&
+            ("/api/v1/knowledge/semantic/search".equals(path) ||
+             path.matches("^/api/v1/knowledge/documents/[0-9]+/semantic-index$"))) {
+            Long userId=UserContext.get();
+            if(userId==null){rejectUnauthorized(response);return;}
+            if(!rateLimiter.tryAcquire("cc:rate:semantic:" + userId,1,1)){reject(response);return;}
+        }
         chain.doFilter(request, response);
     }
 

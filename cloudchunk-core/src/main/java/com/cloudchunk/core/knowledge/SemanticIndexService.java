@@ -50,9 +50,9 @@ public class SemanticIndexService {
                 INSERT INTO knowledge_embedding_job(file_id,generation,model_key,user_id,status)
                 VALUES (?,?,?,?,'PENDING')
                 ON DUPLICATE KEY UPDATE
-                  status=IF(status IN ('FAILED','STALE'),'PENDING',status),
                   attempts=IF(status IN ('FAILED','STALE'),0,attempts),
                   next_index=IF(status IN ('FAILED','STALE'),0,next_index),
+                  status=IF(status IN ('FAILED','STALE'),'PENDING',status),
                   updated_at=NOW(6)
                 """,doc.fileId(),doc.generation(),provider.modelKey(),userId);
             return statusByKey(doc,userId);
