@@ -5,6 +5,8 @@ import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.knowledge.KnowledgeModels.*;
 import com.cloudchunk.core.knowledge.KnowledgeService;
 import com.cloudchunk.core.knowledge.GroundedAnswerService;
+import com.cloudchunk.core.knowledge.SemanticIndexService;
+import com.cloudchunk.core.knowledge.HybridSearchService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,10 +17,17 @@ import org.springframework.web.bind.annotation.*;
 public class KnowledgeController {
     private final KnowledgeService service;
     private final GroundedAnswerService assistant;
-    public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant) {
+    private final SemanticIndexService semantic;
+    private final HybridSearchService hybrid;
+    public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
+                               SemanticIndexService semantic, HybridSearchService hybrid) {
         this.service = service;
         this.assistant = assistant;
+        this.semantic = semantic;
+        this.hybrid = hybrid;
     }
+    public record SemanticSearchRequest(String query,boolean consent) {}
+    public record SemanticIndexRequest(boolean consent) {}
     public record SearchRequest(String query) {}
 
     @GetMapping("/documents")
@@ -47,6 +56,29 @@ public class KnowledgeController {
     @PostMapping("/assistant/answer")
     public ResponseEntity<R<AnswerResponse>> answer(@RequestBody AnswerRequest request) {
         return noStore(assistant.answer(UserContext.requireUserId(), request));
+    }
+    @GetMapping("/semantic/capabilities")
+    public ResponseEntity<R<SemanticIndexService.Capabilities>> semanticCapabilities() {
+        UserContext.requireUserId();
+        return noStore(semantic.capabilities());
+    }
+    @PostMapping("/semantic/search")
+    public ResponseEntity<R<SearchResult>> semanticSearch(@RequestBody SemanticSearchRequest request) {
+        return noStore(hybrid.search(UserContext.requireUserId(),request.query(),request.consent()));
+    }
+    @PostMapping("/documents/{id}/semantic-index")
+    public ResponseEntity<R<SemanticIndexService.Status>> semanticIndex(@PathVariable long id,
+                                                                       @RequestBody SemanticIndexRequest request) {
+        return noStore(semantic.request(UserContext.requireUserId(),id,request.consent()));
+    }
+    @GetMapping("/documents/{id}/semantic-index")
+    public ResponseEntity<R<SemanticIndexService.Status>> semanticStatus(@PathVariable long id) {
+        return noStore(semantic.status(UserContext.requireUserId(),id));
+    }
+    @DeleteMapping("/documents/{id}/semantic-index")
+    public ResponseEntity<R<Void>> semanticRevoke(@PathVariable long id) {
+        semantic.revoke(UserContext.requireUserId(),id);
+        return noStore(null);
     }
     private static <T> ResponseEntity<R<T>> noStore(T data) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(R.ok(data));
