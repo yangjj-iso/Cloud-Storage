@@ -22,6 +22,7 @@ public enum ErrorCode {
     FILE_NOT_FOUND(300001, 404, "file not found"),
     FILE_BROKEN(300002, 410, "file broken"),
     RANGE_NOT_SATISFIABLE(300003, 416, "range not satisfiable"),
+    DRIVE_NAME_CONFLICT(300004, 409, "directory already contains this name"),
 
     TRANSCODE_NOT_FOUND(400001, 404, "transcode record not found"),
     TRANSCODE_IN_PROGRESS(400002, 409, "transcode in progress"),

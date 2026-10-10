@@ -232,7 +232,7 @@ public class ShareService {
             throw BizException.of(ErrorCode.INVALID_PARAMETER, "too many entries to save in one request");
         }
         if (node.dir()) {
-            UserFileItem dir = userFileService.mkdir(userId, destParentId, node.getFileName());
+            UserFileItem dir = userFileService.mkdirImported(userId, destParentId, node.getFileName());
             for (UserFile child : userFileService.findByParentActive(sharerId, node.getId())) {
                 saveNode(sharerId, userId, dir.id(), child, count);
             }

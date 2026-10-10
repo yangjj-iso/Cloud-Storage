@@ -17,6 +17,7 @@ import com.cloudchunk.contract.storage.ObjectDeletionQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -74,9 +75,7 @@ public class UserFileService {
     /* ============================ 目录/文件基础操作 ============================ */
 
     public UserFileItem mkdir(long userId, long parentId, String name) {
-        if (name == null || name.isBlank()) {
-            throw BizException.of(ErrorCode.INVALID_PARAMETER, "directory name is required");
-        }
+        name = DriveNamePolicy.check(name);
         if (parentId != 0) {
             UserFile parent = findByIdActive(parentId, userId)
                     .orElseThrow(() -> BizException.of(ErrorCode.INVALID_PARAMETER, "parent directory not found"));
@@ -91,8 +90,25 @@ public class UserFileService {
         dir.setIsDir(true);
         dir.setFileSize(0L);
         dir.setStatus(0);
-        mapper.insert(dir);
+        try { mapper.insert(dir); }
+        catch (DuplicateKeyException duplicate) { throw nameConflict(); }
         return UserFileItem.of(dir);
+    }
+
+    /**
+     * Automatic share import: keep the original name if available, otherwise create
+     * "name (1)", "name (2)" etc. Race protection comes from uk_drive_active_sibling.
+     */
+    public UserFileItem mkdirImported(long userId,long parentId,String name) {
+        String original=DriveNamePolicy.check(name);
+        for(int attempt=0;attempt<=100;attempt++) {
+            try { return mkdir(userId,parentId,
+                attempt==0?original:DriveNamePolicy.suffix(original,attempt)); }
+            catch(BizException conflict) {
+                if(conflict.getErrorCode()!=ErrorCode.DRIVE_NAME_CONFLICT)throw conflict;
+            }
+        }
+        throw nameConflict();
     }
 
     public List<UserFileItem> list(long userId, long parentId) {
@@ -106,14 +122,14 @@ public class UserFileService {
     }
 
     public void rename(long id, long userId, String newName) {
-        if (newName == null || newName.isBlank()) {
-            throw BizException.of(ErrorCode.INVALID_PARAMETER, "new name is required");
-        }
-        int updated = mapper.update(null, new LambdaUpdateWrapper<UserFile>()
+        newName = DriveNamePolicy.check(newName);
+        int updated;
+        try { updated = mapper.update(null, new LambdaUpdateWrapper<UserFile>()
                 .eq(UserFile::getId, id)
                 .eq(UserFile::getUserId, userId)
                 .eq(UserFile::getStatus, 0)
-                .set(UserFile::getFileName, newName));
+                .set(UserFile::getFileName, newName)); }
+        catch (DuplicateKeyException duplicate) { throw nameConflict(); }
         if (updated <= 0) {
             throw BizException.of(ErrorCode.FILE_NOT_FOUND);
         }
@@ -147,11 +163,13 @@ public class UserFileService {
                 cursor = p.getParentId() == null ? 0 : p.getParentId();
             }
         }
-        int updated = mapper.update(null, new LambdaUpdateWrapper<UserFile>()
+        int updated;
+        try { updated = mapper.update(null, new LambdaUpdateWrapper<UserFile>()
                 .eq(UserFile::getId, id)
                 .eq(UserFile::getUserId, userId)
                 .eq(UserFile::getStatus, 0)
-                .set(UserFile::getParentId, newParentId));
+                .set(UserFile::getParentId, newParentId)); }
+        catch (DuplicateKeyException duplicate) { throw nameConflict(); }
         if (updated <= 0) {
             throw BizException.of(ErrorCode.FILE_NOT_FOUND);
         }
@@ -174,15 +192,28 @@ public class UserFileService {
                 return;
             }
         }
-        UserFile uf = new UserFile();
-        uf.setUserId(userId);
-        uf.setParentId(parentId);
-        uf.setFileId(fileId);
-        uf.setFileName(fileName == null || fileName.isBlank() ? "file" : fileName);
-        uf.setIsDir(false);
-        uf.setFileSize(fileSize);
-        uf.setStatus(0);
-        mapper.insert(uf);
+        String original=DriveNamePolicy.check(fileName==null || fileName.isBlank()?"file":fileName);
+        for(int attempt=0;attempt<=100;attempt++) {
+            String next=attempt==0?original:DriveNamePolicy.suffix(original,attempt);
+            UserFile uf = new UserFile();
+            uf.setUserId(userId);
+            uf.setParentId(parentId);
+            uf.setFileId(fileId);
+            uf.setFileName(next);
+            uf.setIsDir(false);
+            uf.setFileSize(fileSize);
+            uf.setStatus(0);
+            try {
+                mapper.insert(uf);
+                return;
+            } catch(DuplicateKeyException duplicate) {
+                // Preserve legacy same-file/same-folder idempotency after a concurrent insert.
+                if(findActiveByUserAndFileId(userId,fileId).stream().anyMatch(e->
+                        parentId==(e.getParentId()==null?0:e.getParentId())))return;
+                // Some OTHER file or directory took this display name. Keep trying suffixes.
+            }
+        }
+        throw nameConflict();
     }
 
     /* ============================ 回收站 ============================ */
@@ -244,7 +275,8 @@ public class UserFileService {
             if (restoreToRoot && n.getId() != null && n.getId().equals(root.getId())) {
                 update.set(UserFile::getParentId, 0L);
             }
-            int updated = mapper.update(null, update);
+            try { mapper.update(null, update); }
+            catch(DuplicateKeyException duplicate) { throw nameConflict(); }
         }
     }
 
@@ -300,6 +332,11 @@ public class UserFileService {
             if (updated > 0) n++;
         }
         return n;
+    }
+
+    private static BizException nameConflict() {
+        return BizException.of(ErrorCode.DRIVE_NAME_CONFLICT,
+            "同一目录下已有同名文件或文件夹，请使用其他名称");
     }
 
     /* ============================ helpers ============================ */
