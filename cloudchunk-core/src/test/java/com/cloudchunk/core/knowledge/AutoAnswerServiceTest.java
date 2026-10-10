@@ -16,6 +16,7 @@ class AutoAnswerServiceTest {
     private final AutoAnswerService auto = new AutoAnswerService(search, answer);
 
     @Test void disabledOrUnconsentedNeverSearchesOrCallsModel() {
+        when(answer.capabilities()).thenReturn(new AssistantCapabilities(false,"SELECTED_KEYWORD_EVIDENCE"));
         assertEquals(ErrorCode.AI_DISABLED, assertThrows(BizException.class,
             () -> auto.ask(7, new AutoAskRequest("上传完整性如何保证",true))).getErrorCode());
         when(answer.capabilities()).thenReturn(new AssistantCapabilities(true,"SELECTED_KEYWORD_EVIDENCE"));
