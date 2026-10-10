@@ -30,12 +30,13 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 9,"V9 must actually execute");
+        assertTrue(result.migrationsExecuted >= 10,"V10 must actually execute");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
+        jdbc.update("DELETE FROM ai_rename_proposal");
         jdbc.update("DELETE FROM knowledge_document"); jdbc.update("DELETE FROM user_file"); jdbc.update("DELETE FROM file_meta");
         jdbc.update("DELETE FROM ai_model_daily_usage");
         jdbc.update("""
@@ -249,6 +250,80 @@ class KnowledgeIsolationIT {
                 com.fasterxml.jackson.databind.node.NullNode.getInstance()));
         mirror.pruneOne();
         verify(store).delete(eq(modelKey),eq(java.util.List.of(pointId)));
+    }
+    @Test void aiRenameRequiresConsentAndSecondConfirmationAndLeavesAnAuditRow() {
+        var c=claim();publish(c,"Content about uploading verified chunks");
+        var agentGateway=mock(com.cloudchunk.core.knowledge.ChatGateway.class);
+        when(agentGateway.configured()).thenReturn(true);
+        when(agentGateway.completeWithUsage(anyString(),anyList())).thenReturn(
+            new com.cloudchunk.core.knowledge.ChatGateway.Completion(
+                "安全上传说明.txt [S1]",com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        doAnswer(inv->{
+            jdbc.update("UPDATE user_file SET file_name=? WHERE id=101 AND user_id=1",inv.getArgument(2));
+            return null;
+        }).when(drive).rename(eq(101L),eq(1L),anyString());
+        var agent=new com.cloudchunk.core.knowledge.AiRenameAgentService(
+            service,drive,agentGateway,mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class),
+            jdbc,new org.springframework.mock.env.MockEnvironment()
+                .withProperty("cloudchunk.ai.agent.rename-enabled","true"));
+        var request=new com.cloudchunk.core.knowledge.AiRenameAgentService.SuggestRequest(
+            new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef(
+                "101",c.generation(),0),true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            ()->agent.suggest(1,new com.cloudchunk.core.knowledge.AiRenameAgentService.SuggestRequest(
+                request.source(),false)));
+        verifyNoInteractions(drive);
+        var plan=agent.suggest(1,request);
+        assertEquals("Alice.txt",plan.oldName());
+        assertEquals("安全上传说明.txt",plan.newName());
+        assertEquals("PENDING",plan.status());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_rename_proposal",Integer.class));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            agent.apply(2,plan.id(),
+                new com.cloudchunk.core.knowledge.AiRenameAgentService.ApplyRequest(true)));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            agent.apply(1,plan.id(),
+                new com.cloudchunk.core.knowledge.AiRenameAgentService.ApplyRequest(false)));
+        verifyNoInteractions(drive);
+        assertEquals("APPLIED",agent.apply(1,plan.id(),
+            new com.cloudchunk.core.knowledge.AiRenameAgentService.ApplyRequest(true)).status());
+        verify(drive,times(1)).rename(101,1,"安全上传说明.txt");
+        assertEquals("安全上传说明.txt",jdbc.queryForObject(
+            "SELECT file_name FROM user_file WHERE id=101",String.class));
+        assertEquals("APPLIED",jdbc.queryForObject(
+            "SELECT status FROM ai_rename_proposal WHERE id=?",String.class,plan.id()));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            agent.apply(1,plan.id(),
+                new com.cloudchunk.core.knowledge.AiRenameAgentService.ApplyRequest(true)));
+        verify(drive,times(1)).rename(101,1,"安全上传说明.txt");
+    }
+    @Test void aiRenameRefusesChangedNamesAndRecycledSources() {
+        var c=claim();publish(c,"About reliable transfer");
+        var gateway=mock(com.cloudchunk.core.knowledge.ChatGateway.class);
+        when(gateway.configured()).thenReturn(true);
+        when(gateway.completeWithUsage(anyString(),anyList())).thenReturn(
+            new com.cloudchunk.core.knowledge.ChatGateway.Completion(
+                "传输可靠性.txt [S1]",com.cloudchunk.core.knowledge.ModelTokenUsage.unknown()));
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        var agent=new com.cloudchunk.core.knowledge.AiRenameAgentService(
+            service,drive,gateway,mock(com.cloudchunk.core.knowledge.AiDailyCallBudget.class),
+            jdbc,new org.springframework.mock.env.MockEnvironment()
+                .withProperty("cloudchunk.ai.agent.rename-enabled","true"));
+        var request=new com.cloudchunk.core.knowledge.AiRenameAgentService.SuggestRequest(
+            new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef(
+                "101",c.generation(),0),true);
+        var plan=agent.suggest(1,request);
+        jdbc.update("UPDATE user_file SET file_name='manually-renamed.txt' WHERE id=101");
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            agent.apply(1,plan.id(),
+                new com.cloudchunk.core.knowledge.AiRenameAgentService.ApplyRequest(true)));
+        verifyNoInteractions(drive);
+        jdbc.update("UPDATE user_file SET file_name='Alice.txt',status=1 WHERE id=101");
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            agent.apply(1,plan.id(),
+                new com.cloudchunk.core.knowledge.AiRenameAgentService.ApplyRequest(true)));
+        verifyNoInteractions(drive);
     }
     @Test void anExpiredWorkerCannotPublishOverItsReplacement() {
         var old=claim();
