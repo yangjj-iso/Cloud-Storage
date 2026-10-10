@@ -7,6 +7,7 @@ import com.cloudchunk.core.knowledge.KnowledgeService;
 import com.cloudchunk.core.knowledge.GroundedAnswerService;
 import com.cloudchunk.core.knowledge.SemanticIndexService;
 import com.cloudchunk.core.knowledge.HybridSearchService;
+import com.cloudchunk.core.knowledge.AutoAnswerService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,12 +20,15 @@ public class KnowledgeController {
     private final GroundedAnswerService assistant;
     private final SemanticIndexService semantic;
     private final HybridSearchService hybrid;
+    private final AutoAnswerService autoAnswer;
     public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
-                               SemanticIndexService semantic, HybridSearchService hybrid) {
+                               SemanticIndexService semantic, HybridSearchService hybrid,
+                               AutoAnswerService autoAnswer) {
         this.service = service;
         this.assistant = assistant;
         this.semantic = semantic;
         this.hybrid = hybrid;
+        this.autoAnswer = autoAnswer;
     }
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
@@ -56,6 +60,10 @@ public class KnowledgeController {
     @PostMapping("/assistant/answer")
     public ResponseEntity<R<AnswerResponse>> answer(@RequestBody AnswerRequest request) {
         return noStore(assistant.answer(UserContext.requireUserId(), request));
+    }
+    @PostMapping("/assistant/ask")
+    public ResponseEntity<R<AutoAskResponse>> autoAsk(@RequestBody AutoAskRequest request) {
+        return noStore(autoAnswer.ask(UserContext.requireUserId(), request));
     }
     @GetMapping("/semantic/capabilities")
     public ResponseEntity<R<SemanticIndexService.Capabilities>> semanticCapabilities() {

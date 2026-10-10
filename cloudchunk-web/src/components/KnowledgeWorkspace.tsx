@@ -3,6 +3,7 @@ import { knowledgeApi, statusLabels, type AnswerResponse, type AssistantCapabili
   type KnowledgeDocument, type Library, type SearchResult, type SourceRef, type SemanticCapabilities, type SemanticIndexStatus } from '../lib/knowledge';
 import { MaterialIcon } from './ui/MaterialIcon';
 import './knowledge-workspace.css';
+import { DirectAskPanel } from './DirectAskPanel';
 
 type Selection = { userFileId: string; fileName: string; generation: number; chunkIndex?: number };
 
@@ -150,6 +151,7 @@ export function KnowledgeWorkspace() {
       </div>
       <div className={`kw-layout ${selection ? 'kw-with-evidence' : ''}`}>
         <div className="kw-main">
+          <DirectAskPanel onSourceOpen={setSelection} />
           <div className="kw-section-title">
             <div><h3>{searched ? '正文检索结果' : '我的文档资料'}</h3><p>{searched ? `查询：“${searched}”` : '支持 TXT、Markdown、文本型 PDF 和 DOCX'}</p></div>
             {searched ? <button className="kw-button" onClick={clearSearch}>返回资料</button>

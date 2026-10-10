@@ -16,4 +16,6 @@ public final class KnowledgeModels {
     public record CitedSource(String citationId, Evidence evidence) {}
     public record AnswerResponse(String answer, List<CitedSource> citations, String mode) {}
     public record AssistantCapabilities(boolean enabled, String retrievalMode) {}
+    public record AutoAskRequest(String question, boolean consent) {}
+    public record AutoAskResponse(AnswerResponse response, String retrievalMode, int selectedCount) {}
 }

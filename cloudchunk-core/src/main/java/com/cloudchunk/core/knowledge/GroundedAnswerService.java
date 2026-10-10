@@ -76,7 +76,6 @@ public class GroundedAnswerService {
         if (used.isEmpty()) throw BizException.of(ErrorCode.AI_UNGROUNDED);
         List<CitedSource> cited = new ArrayList<>();
         for (int i = 0; i < sources.size(); i++) {
-            if (!used.contains(i+1)) continue;
             SourceRef ref = request.sources().get(i);
             CitedSource previous = sources.get(i);
             // Revocation or reindexing during inference invalidates the pending response.
@@ -85,7 +84,8 @@ public class GroundedAnswerService {
             if (now == null || !now.content().equals(previous.evidence().content())) {
                 throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
             }
-            cited.add(previous);
+            // All inputs are reauthorized, including evidence not cited in the final text.
+            if (used.contains(i+1)) cited.add(previous);
         }
         return new AnswerResponse(answer,List.copyOf(cited),"MODEL_WITH_CITATIONS");
     }
