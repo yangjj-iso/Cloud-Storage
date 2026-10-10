@@ -81,8 +81,8 @@ def check_env(values, production=False):
         raise GateError("database and object storage must not share credentials")
     if values["MINIO_ROOT_USER"].lower() in ("minioadmin", "root", "admin"):
         raise GateError("MINIO_ROOT_USER must not be a sample account")
-    if len(values.get("METRICS_SCRAPE_TOKEN", "")) < 32 or
-            values.get("METRICS_SCRAPE_TOKEN", "").lower() in BAD_SECRETS:
+    if (len(values.get("METRICS_SCRAPE_TOKEN", "")) < 32 or
+            values.get("METRICS_SCRAPE_TOKEN", "").lower() in BAD_SECRETS):
         raise GateError("METRICS_SCRAPE_TOKEN is missing or weak")
     if values.get("PROMETHEUS_PUBLIC", "false").lower() != "false":
         raise GateError("PROMETHEUS_PUBLIC must be false")
