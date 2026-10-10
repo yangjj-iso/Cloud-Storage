@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { knowledgeApi, statusLabels, type AnswerResponse, type AssistantCapabilities, type BlockPage, type Evidence,
-  type KnowledgeDocument, type Library, type SearchResult, type SourceRef } from '../lib/knowledge';
+  type KnowledgeDocument, type Library, type SearchResult, type SourceRef, type SemanticCapabilities, type SemanticIndexStatus } from '../lib/knowledge';
 import { MaterialIcon } from './ui/MaterialIcon';
 import './knowledge-workspace.css';
 
@@ -29,6 +29,9 @@ export function KnowledgeWorkspace() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [searched, setSearched] = useState('');
+  const [semanticCapabilities, setSemanticCapabilities] = useState<SemanticCapabilities | null>(null);
+  const [semanticMode, setSemanticMode] = useState(false);
+  const [semanticConsent, setSemanticConsent] = useState(false);
   const [results, setResults] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -59,18 +62,33 @@ export function KnowledgeWorkspace() {
     const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 10000);
     return () => { disposed = true; request?.abort(); window.clearInterval(timer); };
   }, [page, revision]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void knowledgeApi.semanticCapabilities(controller.signal)
+      .then(c => { if (!controller.signal.aborted) setSemanticCapabilities(c); })
+      .catch(() => { if (!controller.signal.aborted) setSemanticCapabilities({enabled:false,retrievalMode:'BOUNDED_MYSQL_COSINE_RRF'}); });
+    return () => controller.abort();
+  }, []);
   useEffect(() => () => { searchRequest.current?.abort(); indexRequest.current?.abort(); }, []);
 
   const search = async (event: FormEvent) => {
     event.preventDefault();
     const value = query.trim();
     if (value.length < 2 || value.length > 100) { setSearchError('请输入 2 到 100 个字符的关键词'); return; }
+    if (semanticMode && semanticCapabilities?.enabled && !semanticConsent) {
+      setSearchError('语义检索会将本次查询发送到部署方配置的 Embedding 模型，请先勾选授权');
+      return;
+    }
     searchRequest.current?.abort();
     const current = new AbortController(); searchRequest.current = current;
     setSearching(true); setSearchError(''); setResults(null); setSelection(null); setSearched(value);
     const timer = window.setTimeout(() => current.abort(), 15000);
     try {
-      const data = await knowledgeApi.search(value, current.signal);
+      const data = semanticMode && semanticCapabilities?.enabled
+        ? await knowledgeApi.semanticSearch(value, semanticConsent, current.signal)
+        : await knowledgeApi.search(value, current.signal);
+      // Model transmission consent applies to this query only.
+      if (semanticMode) setSemanticConsent(false);
       if (!current.signal.aborted) setResults(data);
     } catch (error) {
       if (searchRequest.current === current) setSearchError(current.signal.aborted ? '搜索超时，请缩短关键词后重试' : errorMessage(error));
@@ -81,7 +99,7 @@ export function KnowledgeWorkspace() {
   };
   const clearSearch = () => {
     searchRequest.current?.abort(); searchRequest.current = null;
-    setQuery(''); setSearched(''); setResults(null); setSearching(false); setSearchError(''); setSelection(null);
+    setQuery(''); setSearched(''); setResults(null); setSearching(false); setSemanticConsent(false); setSearchError(''); setSelection(null);
     searchInput.current?.focus();
   };
   const index = async (doc: KnowledgeDocument) => {
@@ -109,17 +127,30 @@ export function KnowledgeWorkspace() {
         <p>检索正文、核对原文。需要时选择证据并明确授权，由可选模型整理带引用的回答。</p>
         <form className="kw-search" onSubmit={search}>
           <MaterialIcon>search</MaterialIcon>
-          <label className="sr-only" htmlFor="knowledge-query">搜索已解析文档的正文关键词</label>
+          <label className="sr-only" htmlFor="knowledge-query">搜索已解析文档正文</label>
           <input ref={searchInput} id="knowledge-query" value={query} onChange={e => setQuery(e.target.value)}
-            maxLength={100} placeholder="输入正文中的关键词，例如：断点续传" autoComplete="off" />
-          <button type="submit" disabled={searching || query.trim().length < 2}>{searching ? '检索中…' : '检索正文'}<MaterialIcon>arrow_forward</MaterialIcon></button>
+            maxLength={100} placeholder={semanticMode ? '自然语言提问，例如：如何保护上传的完整性？' : '输入正文关键词，例如：断点续传'} autoComplete="off" />
+          <button type="submit" disabled={searching || query.trim().length < 2}>{searching ? '检索中…' : semanticMode ? '混合检索' : '检索正文'}<MaterialIcon>arrow_forward</MaterialIcon></button>
         </form>
-        <div className="kw-hints"><span><MaterialIcon>lock</MaterialIcon>仅检索你当前可访问的文件</span><span>关键词匹配 · AI 问答默认关闭</span></div>
+        <div className="kw-search-modes" role="group" aria-label="搜索方式">
+          <button type="button" className={!semanticMode ? 'kw-mode-active' : ''}
+            onClick={() => { setSemanticMode(false); setSemanticConsent(false); }}>精确关键词</button>
+          <button type="button" className={semanticMode ? 'kw-mode-active' : ''}
+            disabled={!semanticCapabilities?.enabled} onClick={() => setSemanticMode(true)}>
+            <MaterialIcon>auto_awesome</MaterialIcon> 语义 + 关键词
+          </button>
+          {!semanticCapabilities?.enabled && <span>需管理员启用 Embedding</span>}
+        </div>
+        {semanticMode && semanticCapabilities?.enabled && <label className="kw-consent kw-search-consent">
+          <input type="checkbox" checked={semanticConsent} onChange={e => setSemanticConsent(e.target.checked)} />
+          <span>仅同意将本次查询发送到已配置的 Embedding 模型服务，查询后自动清除授权。</span>
+        </label>}
+        <div className="kw-hints"><span><MaterialIcon>lock</MaterialIcon>搜索结果与证据始终按当前文件权限读取</span><span>语义索引由用户对单份文件主动开启</span></div>
       </div>
       <div className={`kw-layout ${selection ? 'kw-with-evidence' : ''}`}>
         <div className="kw-main">
           <div className="kw-section-title">
-            <div><h3>{searched ? '正文检索结果' : '我的文档资料'}</h3><p>{searched ? `关键词：“${searched}”` : '支持 TXT、Markdown、文本型 PDF 和 DOCX'}</p></div>
+            <div><h3>{searched ? '正文检索结果' : '我的文档资料'}</h3><p>{searched ? `查询：“${searched}”` : '支持 TXT、Markdown、文本型 PDF 和 DOCX'}</p></div>
             {searched ? <button className="kw-button" onClick={clearSearch}>返回资料</button>
               : <button className="kw-button" onClick={() => setRevision(v => v + 1)} disabled={loading}><MaterialIcon>refresh</MaterialIcon>刷新</button>}
           </div>
@@ -127,6 +158,13 @@ export function KnowledgeWorkspace() {
           {(searchError || (!searched && libraryError)) && <div className="kw-error" role="alert">{searchError || libraryError}</div>}
           {searched ? <>
             {searching && <div className="kw-empty" role="status">正在检查权限并检索正文…</div>}
+            {results && <p className="kw-search-mode-hint">{{
+              HYBRID_RRF_LIMITED: '混合检索：对已建立语义索引的文档进行向量与关键词融合，结果为有限候选集，不代表全量搜索。',
+              SEMANTIC_NOT_INDEXED: '当前账号尚无完成的语义索引，本次只返回关键词结果。请在资料列表中主动为文档建立语义索引。',
+              KEYWORD_FALLBACK: 'Embedding 服务暂不可用，已明确降级为关键词结果。',
+              SEMANTIC_DISABLED: '语义能力未开启，当前仅使用关键词结果。',
+              LITERAL_KEYWORD: '精确关键词检索：仅匹配片段中的字面文字。',
+            }[results.mode]}</p>}
             {results && results.evidence.length === 0 && <div className="kw-empty"><MaterialIcon>manage_search</MaterialIcon><h4>没有找到匹配的已索引片段</h4><p>试试文档中的精确短语。未索引、解析失败和未提取到的部分不在搜索范围内。</p></div>}
             {results && results.evidence.length > 0 && <div className="kw-results">
               {results.evidence.map(hit => <button className="kw-hit" key={`${hit.userFileId}-${hit.generation}-${hit.chunkIndex}`} onClick={() => setSelection(hit)}>
@@ -149,13 +187,14 @@ export function KnowledgeWorkspace() {
                 <span className={`kw-state kw-state-${doc.status.toLowerCase()}`}>{statusLabels[doc.status] ?? doc.status}</span>
                 {readable(doc) ? <button className="kw-button" aria-label={`查看 ${doc.fileName} 的来源片段`} onClick={() => setSelection(doc)}>查看正文<MaterialIcon>chevron_right</MaterialIcon></button>
                   : (doc.status === 'NOT_INDEXED' || doc.status === 'FAILED') ? <button className="kw-button" disabled={indexing !== null} onClick={() => void index(doc)}>{indexing === doc.userFileId ? '提交中…' : doc.status === 'FAILED' ? '重试' : '建立索引'}</button> : null}
+                {semanticCapabilities?.enabled && readable(doc) && <SemanticIndexAction doc={doc} />}
               </article>)}</div>}
             <div className="kw-pagination"><span>第 {page} 页 · 每页最多 20 份资料</span><div>
               <button className="kw-button" disabled={page <= 1 || loading} onClick={() => { setPage(p => p - 1); setSelection(null); }}>上一页</button>
               <button className="kw-button" disabled={!library?.hasMore || loading} onClick={() => { setPage(p => p + 1); setSelection(null); }}>下一页</button>
             </div></div>
           </>}
-          <div className="kw-boundary"><MaterialIcon>info</MaterialIcon><p>每份文件上限 20 MB，最多提取 262144 字符；扫描件 OCR、图片和附件仍不在本阶段范围内。可选模型问答需要单次用户授权；引用编号不代表事实已自动核实。</p></div>
+          <div className="kw-boundary"><MaterialIcon>info</MaterialIcon><p>语义检索需用户主动为每份文档建立索引，且每次查询须确认模型传输。当前最多支持每文档 64 片段；MySQL 小语料混合排名并非大规模向量数据库。引用不等于事实核验。</p></div>
         </div>
         {selection && <EvidencePanel key={`${selection.userFileId}-${selection.generation}-${selection.chunkIndex ?? "start"}`} selection={selection} onClose={() => { setSelection(null); searchInput.current?.focus(); }} />}
       </div>
@@ -249,6 +288,9 @@ function AssistantPanel({ results, onSourceOpen }: { results: SearchResult; onSo
     {!capabilities?.enabled
       ? <p className="kw-footnote">当前部署没有启用模型服务。你仍可使用正文检索和证据阅读；管理员可以按照部署文档配置。</p>
       : <form onSubmit={ask}>
+        <button type="button" className="kw-button" onClick={() => {
+          setSelected(results.evidence.slice(0,4).map(keyFor)); setAnswer(null);
+        }}>推荐前 4 条证据（请核对后再授权）</button>
         <fieldset className="kw-source-pick">
           <legend>勾选证据（{selected.length}/6）</legend>
           {results.evidence.map(hit => <label key={keyFor(hit)}>
@@ -286,4 +328,50 @@ function AssistantPanel({ results, onSourceOpen }: { results: SearchResult; onSo
       </div>}
     </section>}
   </section>;
+}
+
+
+/** Semantic indexing is separate from local text extraction and needs explicit per-file consent. */
+function SemanticIndexAction({doc}:{doc:KnowledgeDocument}) {
+  const [status,setStatus]=useState<SemanticIndexStatus | null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const request=useRef<AbortController | null>(null);
+  useEffect(()=>{
+    const controller=new AbortController();
+    const load=()=>void knowledgeApi.semanticStatus(doc.userFileId,controller.signal)
+      .then(value=>{if(!controller.signal.aborted)setStatus(value);})
+      .catch(()=>{if(!controller.signal.aborted)setError('索引状态读取失败');});
+    load();
+    const timer=window.setInterval(load,12000);
+    return ()=>{controller.abort();window.clearInterval(timer);request.current?.abort();};
+  },[doc.userFileId,doc.generation]);
+  const begin=async()=>{
+    if(!window.confirm('确认将此文档的正文片段发送给部署方配置的 Embedding 模型服务进行索引？该服务可能在外部；取消后仍可继续普通文件管理。'))return;
+    setBusy(true);setError('');
+    const controller=new AbortController();request.current=controller;
+    try {
+      setStatus(await knowledgeApi.semanticIndex(doc.userFileId,true,controller.signal));
+    } catch(e){if(!controller.signal.aborted)setError(errorMessage(e));}
+    finally{setBusy(false);}
+  };
+  const revoke=async()=>{
+    if(!window.confirm('撤销此文件的语义检索授权？现有对话与已发送的外部请求无法撤销。'))return;
+    setBusy(true);setError('');
+    const controller=new AbortController();request.current=controller;
+    try{await knowledgeApi.semanticRevoke(doc.userFileId,controller.signal);setStatus({status:'NOT_REQUESTED',completed:0,total:doc.chunkCount});}
+    catch(e){if(!controller.signal.aborted)setError(errorMessage(e));}
+    finally{setBusy(false);}
+  };
+  return <div className="kw-semantic-status">
+    {status?.status==='READY' ? <><span>语义索引就绪</span>
+      <button type="button" className="kw-button" onClick={()=>void revoke()} disabled={busy}>撤销</button></>
+      : status?.status==='PENDING'||status?.status==='RUNNING' ? <span role="status">向量索引 {status.completed}/{status.total} · 处理中</span>
+      : <button type="button" className="kw-button" onClick={()=>void begin()}
+        disabled={busy || doc.chunkCount>64 || doc.chunkCount===0}>
+        {busy?'提交中…':status?.status==='FAILED'?'重试语义索引':status?.status==='STALE'?'重新建立语义索引':'开启语义索引'}
+      </button>}
+    {doc.chunkCount>64 && <small>超出 64 片段上限</small>}
+    {error && <small role="alert">{error}</small>}
+  </div>;
 }

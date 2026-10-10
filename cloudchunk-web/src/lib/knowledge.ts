@@ -23,9 +23,11 @@ export interface Evidence {
   status: KnowledgeStatus;
 }
 export interface Library { documents: KnowledgeDocument[]; hasMore: boolean; page: number }
-export interface SearchResult { evidence: Evidence[]; hasMore: boolean; mode: 'LITERAL_KEYWORD' }
+export interface SearchResult { evidence: Evidence[]; hasMore: boolean; mode: 'LITERAL_KEYWORD' | 'HYBRID_RRF_LIMITED' | 'SEMANTIC_NOT_INDEXED' | 'KEYWORD_FALLBACK' | 'SEMANTIC_DISABLED' }
 export interface BlockPage { blocks: Evidence[]; hasMore: boolean; page: number }
 export interface AssistantCapabilities { enabled: boolean; retrievalMode: 'SELECTED_KEYWORD_EVIDENCE' }
+export interface SemanticCapabilities { enabled: boolean; retrievalMode: string }
+export interface SemanticIndexStatus { status: 'NOT_REQUESTED' | 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'STALE'; completed: number; total: number }
 export interface SourceRef { userFileId: string; generation: number; chunkIndex: number }
 export interface AnswerResponse {
   answer: string;
@@ -33,9 +35,9 @@ export interface AnswerResponse {
   mode: 'MODEL_WITH_CITATIONS' | 'INSUFFICIENT_EVIDENCE';
 }
 
-async function request<T>(path: string, signal: AbortSignal, body?: unknown): Promise<T> {
+async function request<T>(path: string, signal: AbortSignal, body?: unknown, overrideMethod?: 'DELETE'): Promise<T> {
   const response = await fetch(`/api/v1/knowledge${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
+    method: overrideMethod ?? (body === undefined ? 'GET' : 'POST'),
     headers: { ...getAuthHeader(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     cache: 'no-store', signal,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -62,6 +64,16 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown): Pr
 export const knowledgeApi = {
   library: (page: number, signal: AbortSignal) => request<Library>(`/documents?page=${page}`, signal),
   search: (query: string, signal: AbortSignal) => request<SearchResult>('/search', signal, { query }),
+  semanticCapabilities: (signal: AbortSignal) =>
+    request<SemanticCapabilities>('/semantic/capabilities',signal),
+  semanticSearch: (query: string, consent: boolean, signal: AbortSignal) =>
+    request<SearchResult>('/semantic/search', signal, { query, consent }),
+  semanticIndex: (id: string, consent: boolean, signal: AbortSignal) =>
+    request<SemanticIndexStatus>(`/documents/${encodeURIComponent(id)}/semantic-index`,signal,{consent}),
+  semanticStatus: (id: string, signal: AbortSignal) =>
+    request<SemanticIndexStatus>(`/documents/${encodeURIComponent(id)}/semantic-index`,signal),
+  semanticRevoke: (id: string, signal: AbortSignal) =>
+    request<void>(`/documents/${encodeURIComponent(id)}/semantic-index`,signal,undefined,'DELETE'),
   index: (id: string, signal: AbortSignal) => request<void>(`/documents/${encodeURIComponent(id)}/index`, signal, {}),
   assistantCapabilities: (signal: AbortSignal) =>
     request<AssistantCapabilities>('/assistant/capabilities', signal),
