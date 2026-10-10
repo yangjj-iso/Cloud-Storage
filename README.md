@@ -158,6 +158,7 @@ npm run dev
 - [AI Token 用量与中文检索评测](./docs/18-ai-evaluation-and-usage.md)：提供方用量、费用估算、延迟分位和基准脚本。
 - [受控 AI 文件操作 M2.8](./docs/19-ai-confirmed-rename.md)：基于原文生成建议、预览差异、二次确认重命名与审计。
 - [受控 AI 文件归类 M2.9](./docs/20-ai-confirmed-move.md)：用户授权、已存在目录推荐、二次确认移动与权限回归。
+- [AI 整理体验 M3.0](./docs/21-ai-folder-shortlist-history.md)：自主选择文件夹候选、同名冲突预检与历史记录面板。
 
 ## 验证
 
