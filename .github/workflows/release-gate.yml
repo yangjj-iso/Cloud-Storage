@@ -1,4 +1,4 @@
-name: M3.5 release gates
+name: M3.6 release and stability gates
 on:
   pull_request:
     branches: [main]
@@ -13,7 +13,11 @@ on:
         required: true
         default: false
       health_base:
-        description: "Production HTTPS base URL (only for live_readonly; no credentials)"
+        description: "Private HTTPS gateway directly routing /actuator/health + /api/v1/ping"
+        type: string
+        required: false
+      prometheus_base:
+        description: "Private HTTPS Prometheus base URL for post-deploy SLO gate"
         type: string
         required: false
 
@@ -53,12 +57,23 @@ jobs:
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
           printf '%s\n' 'MYSQL_ROOT_PASSWORD=ci-only-not-a-real-password-123' 'MINIO_ROOT_PASSWORD=separate-ci-not-a-real-password-456' 'MINIO_ROOT_USER=ci-storage' 'WS_ALLOWED_ORIGINS=https://test.example.com' > "$tmp"
+          token="ci-scrape-token-long-enough-to-be-secret-123456"
+          tokenfile="$(mktemp)"
+          trap 'rm -f "$tmp" "$tokenfile"' EXIT
+          printf '%s' "$token" > "$tokenfile"
+          chmod 600 "$tokenfile"
+          printf 'METRICS_SCRAPE_TOKEN=%s\nMETRICS_TOKEN_FILE=%s\n' "$token" "$tokenfile" >> "$tmp"
+          printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "strong-ci-grafana-password-12345" >> "$tmp"
           digest="$(printf 'a%.0s' {1..64})"
           for key in CLOUDCHUNK_API_IMAGE CLOUDCHUNK_WEB_IMAGE CC_MYSQL_IMAGE CC_REDIS_IMAGE CC_RMQ_IMAGE CC_RMQ_DASHBOARD_IMAGE CC_MINIO_IMAGE CC_QDRANT_IMAGE CC_JAEGER_IMAGE CC_PROMETHEUS_IMAGE CC_GRAFANA_IMAGE; do
             printf '%s=registry.invalid/%s@sha256:%s\n' "$key" "${key,,}" "$digest" >> "$tmp"
           done
           docker compose --env-file "$tmp" -f deploy/docker-compose.yml -f deploy/docker-compose.prod.example.yml --profile app --profile vector --profile observability config --format json |
             python3 deploy/release/config_gate.py --mode production --env-file "$tmp" --compose-config -
+
+      - name: Validate Prometheus alert rule syntax
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/observability/rules:/rules:ro" prom/prometheus:v2.55.1 check rules /rules/cloudchunk-alerts.yml
 
   build-verification:
     name: backend and frontend build
@@ -112,6 +127,7 @@ jobs:
       MYSQL_PASSWORD: ${{ secrets.RELEASE_MYSQL_PASSWORD }}
       MYSQL_DB: ${{ secrets.RELEASE_MYSQL_DB }}
       RELEASE_HEALTH_BASE: ${{ inputs.health_base }}
+      RELEASE_PROMETHEUS_BASE: ${{ inputs.prometheus_base }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,7 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$MYSQL_HOST" && test -n "$MYSQL_USER" && test -n "$MYSQL_PASSWORD" && test -n "$MYSQL_DB"
-          test -n "$RELEASE_HEALTH_BASE"
+          test -n "$RELEASE_HEALTH_BASE" && test -n "$RELEASE_PROMETHEUS_BASE"
           python3 -c 'import os,sys; from urllib.parse import urlsplit; p=urlsplit(os.environ["RELEASE_HEALTH_BASE"]); sys.exit(0 if p.scheme=="https" and p.hostname and not (p.username or p.password or p.path not in ("","/") or p.query or p.fragment) else 1)'
-      - name: Run live read-only V13 + HTTP readiness gate
-        run: python3 deploy/preflight/check_release.py --phase ready --health-base "$RELEASE_HEALTH_BASE"
+      - name: Run read-only V13, health, Prometheus SLO and outbox acceptance
+        run: python3 deploy/release/post_deploy.py --health-base "$RELEASE_HEALTH_BASE" --prometheus-base "$RELEASE_PROMETHEUS_BASE"

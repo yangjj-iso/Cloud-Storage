@@ -167,6 +167,7 @@ services:
       TRACING_SAMPLING: ${TRACING_SAMPLING:-0.0}
       OTLP_TRACES_ENDPOINT: ${OTLP_TRACES_ENDPOINT:-http://jaeger:4318/v1/traces}
       PROMETHEUS_PUBLIC: ${PROMETHEUS_PUBLIC:-false}
+      METRICS_SCRAPE_TOKEN: ${METRICS_SCRAPE_TOKEN:-}
       AI_QDRANT_ENABLED: ${AI_QDRANT_ENABLED:-false}
       AI_QDRANT_URL: ${AI_QDRANT_URL:-http://qdrant:6333}
       AI_QDRANT_ALLOW_HTTP: ${AI_QDRANT_ALLOW_HTTP:-false}
@@ -254,6 +255,7 @@ services:
       - "--web.enable-lifecycle"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"

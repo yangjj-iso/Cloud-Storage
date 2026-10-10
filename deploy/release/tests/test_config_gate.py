@@ -11,12 +11,20 @@ spec.loader.exec_module(gate)
 
 class ConfigGateTest(unittest.TestCase):
     def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.token_file = pathlib.Path(self.temp.name) / "metrics-token"
+        self.token_file.write_text("sample-scrape-only-ci-token-long-12345")
+        self.token_file.chmod(0o600)
         self.good = {
             "MYSQL_ROOT_PASSWORD": "very-long-db-passphrase-1",
             "MINIO_ROOT_PASSWORD": "separate-long-object-secret-2",
             "MINIO_ROOT_USER": "cloudchunk-storage",
             "WS_ALLOWED_ORIGINS": "https://files.example.com",
             "PROMETHEUS_PUBLIC": "false",
+            "GRAFANA_ADMIN_PASSWORD": "strong-ci-grafana-password-12345",
+            "METRICS_SCRAPE_TOKEN": "sample-scrape-only-ci-token-long-12345",
+            "METRICS_TOKEN_FILE": str(self.token_file),
         }
 
     def compose(self):
@@ -39,10 +47,19 @@ class ConfigGateTest(unittest.TestCase):
                            ("MINIO_ROOT_PASSWORD", "minioadmin"),
                            ("WS_ALLOWED_ORIGINS", "http://example.com"),
                            ("WS_ALLOWED_ORIGINS", "https://*.example.com"),
-                           ("PROMETHEUS_PUBLIC", "true")]:
+                           ("PROMETHEUS_PUBLIC", "true"),
+                           ("GRAFANA_ADMIN_PASSWORD", "admin")]:
             with self.subTest(key=key, value=value):
                 with self.assertRaises(gate.GateError):
                     gate.check_env({**self.good, key: value}, production=True)
+
+    def test_scrape_secret_must_match_private_file(self):
+        bad = {**self.good, "METRICS_SCRAPE_TOKEN": "wrong-token-with-enough-characters-123456789"}
+        with self.assertRaises(gate.GateError):
+            gate.check_env(bad, production=True)
+        self.token_file.chmod(0o644)
+        with self.assertRaises(gate.GateError):
+            gate.check_env(self.good, production=True)
 
     def test_private_prod_env_permissions(self):
         with tempfile.TemporaryDirectory() as d:

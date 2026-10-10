@@ -22,6 +22,8 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 
 import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Configuration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -62,6 +64,8 @@ public class SecurityConfig {
                                                    AuthenticationContextFilter authenticationContextFilter,
                                                    @Value("${cloudchunk.observability.prometheus-public:false}")
                                                    boolean prometheusPublic,
+                                                   @Value("${cloudchunk.observability.prometheus-scrape-token:}")
+                                                   String scrapeToken,
                                                    ObjectMapper objectMapper) throws Exception {
         http.csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -77,6 +81,11 @@ public class SecurityConfig {
                         .requestMatchers(request -> prometheusPublic
                                 && HttpMethod.GET.matches(request.getMethod())
                                 && "/actuator/prometheus".equals(request.getRequestURI())).permitAll()
+                        // Dedicated bearer token is accepted for the scrape path ONLY.
+                        // A missing/short token never grants access; token is not logged.
+                        .requestMatchers(request -> HttpMethod.GET.matches(request.getMethod())
+                                && "/actuator/prometheus".equals(request.getRequestURI())
+                                && validScrapeToken(request.getHeader("Authorization"), scrapeToken)).permitAll()
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
@@ -102,5 +111,12 @@ public class SecurityConfig {
                 .addFilterAfter(traceFilter, SecurityContextHolderFilter.class)
                 .addFilterAfter(authenticationContextFilter, TraceFilter.class);
         return http.build();
+    }
+    static boolean validScrapeToken(String header, String configured) {
+        if (configured == null || configured.length() < 32 || header == null
+                || !header.startsWith("Bearer ")) return false;
+        byte[] expected = configured.getBytes(StandardCharsets.UTF_8);
+        byte[] actual = header.substring(7).getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(expected, actual);
     }
 }
