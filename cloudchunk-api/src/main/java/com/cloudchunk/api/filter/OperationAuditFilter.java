@@ -2,6 +2,7 @@ package com.cloudchunk.api.filter;
 
 import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.audit.service.OperationAuditService;
+import com.cloudchunk.core.audit.service.DriveOperationHistory;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,19 +48,11 @@ public class OperationAuditFilter extends OncePerRequestFilter {
         } finally {
             long costMs = (System.nanoTime() - started) / 1_000_000L;
             String area = area(request.getRequestURI());
-            String opType = area + "_" + request.getMethod().toUpperCase(Locale.ROOT);
+            String opType = DriveOperationHistory.classify(request.getRequestURI(),request.getMethod());
             boolean success = completed && response.getStatus() < 400;
             auditService.record(UserContext.get(), opType, request.getRequestURI(),
                     request.getRemoteAddr(), request.getHeader("User-Agent"), success, costMs);
         }
     }
 
-    private String area(String path) {
-        if (path == null) return "API";
-        String remainder = path.substring(Math.min(path.length(), "/api/v1/".length()));
-        int slash = remainder.indexOf('/');
-        String area = slash < 0 ? remainder : remainder.substring(0, slash);
-        String normalized = area.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
-        return normalized.isBlank() ? "API" : normalized;
-    }
 }
