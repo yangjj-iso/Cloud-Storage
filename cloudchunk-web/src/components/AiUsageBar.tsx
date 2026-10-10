@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { knowledgeApi, type AiUsageSnapshot } from '../lib/knowledge';
 import { MaterialIcon } from './ui/MaterialIcon';
 
-/** Server-authoritative, UTC-day attempted call counters; no file content is displayed. */
+/** Only authenticated user usage counters; no source text is retained. */
 export function AiUsageBar() {
   const [usage, setUsage] = useState<AiUsageSnapshot | null>(null);
   const [error, setError] = useState('');
@@ -30,19 +30,13 @@ export function AiUsageBar() {
     {usage && <div className="kw-token-usage">
       <span>已报告 Token：问答输入 {usage.chat.inputTokens.toLocaleString()} / 输出 {usage.chat.outputTokens.toLocaleString()}</span>
       <span>Embedding 输入 {usage.embedding.inputTokens.toLocaleString()} Token</span>
-      <span>成功报告用量的次数：问答 {usage.chat.reportedCalls}/{usage.chat.used} · Embedding {usage.embedding.reportedCalls}/{usage.embedding.used}</span>
+      <span>带使用量数据的调用数：问答 {usage.chat.reportedCalls}/{usage.chat.used} · Embedding {usage.embedding.reportedCalls}/{usage.embedding.used}</span>
       {(usage.chat.estimatedUsd !== null || usage.embedding.estimatedUsd !== null) &&
-        <span>按当前配置单价估算（USD）：
-          {usage.chat.estimatedUsd !== null ? ' 问答 
-  </div>;
-}
- + usage.chat.estimatedUsd : ' 问答未知'}
-          {usage.embedding.estimatedUsd !== null ? ' · Embedding 
-  </div>;
-}
- + usage.embedding.estimatedUsd : ' · Embedding 未知'}
+        <span>按当前单价估算（USD）：
+          {usage.chat.estimatedUsd !== null ? ' 问答 ' + usage.chat.estimatedUsd : ' 问答未知'}
+          {usage.embedding.estimatedUsd !== null ? ' · Embedding ' + usage.embedding.estimatedUsd : ' · Embedding 未知'}
         </span>}
     </div>}
-    <p>仅统计提供方报告的 Token；未报告或失败的调用不代表免费。估算并非实际账单或金额硬上限。</p>
+    <p>仅统计提供方返回的 Token；缺少使用量字段或失败的请求不代表免费。估算值不是账单或金额硬上限。</p>
   </div>;
 }
