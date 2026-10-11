@@ -33,6 +33,7 @@
 | [M4.0 AI-Native 工作台](./32-ai-native-workspace.md) | AI 首屏、研究工作流、授权批量索引与 Markdown 证据摘录 |
 | [M4.1 受控 Agent 工作流](./33-reviewed-agent-workflows.md) | 计划保存、逐步审批与执行、有限审计记录、Flyway V14 |
 | [M4.2 整理策略与模拟](./34-organizing-templates.md) | 规则模板、MIME 匹配、同名冲突与版本模拟、逐项确认执行 |
+| [M4.3 AI 推荐与反馈](./35-ai-strategy-feedback.md) | 已授权证据驱动的规则候选、单次反馈、用户级质量样本 |
 | [08 基准测试与量化边界](./08-benchmark-metrics.md) | JMH、k6、Shell 脚本与指标解释 |
 | [前端 README](../cloudchunk-web/README.md) | Web 功能覆盖、开发代理和构建 |
 | [压测脚本 README](../deploy/bench/README.md) | k6/Shell 命令、认证和环境变量 |
@@ -69,6 +70,7 @@
 | 研究摘录（最多 12 段，导出前重新鉴权） | 已实现 | 已接入 |
 | AI 多步骤移动工作流（需逐步批准） | 已实现 | 已接入 |
 | 规则模板与冲突模拟（不调用模型） | 已实现 | 已接入 |
+| 证据驱动的 AI 策略推荐与分类型反馈 | 已实现 | 已接入 |
 | IndexedDB 冷启动任务恢复 | 上传状态会写入 | 未实现自动恢复 |
 
 ## 文档维护规则

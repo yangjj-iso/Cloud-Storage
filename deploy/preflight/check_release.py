@@ -31,6 +31,19 @@ SELECT COUNT(*) FROM (
 FAILED_MIGRATIONS = "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0"
 V13_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='13' AND success=1")
+V16_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
+                 "WHERE version='16' AND success=1")
+V16_RECOMMENDATION_TABLE = """
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_schema=DATABASE() AND table_name='ai_strategy_recommendation'
+"""
+V16_UNIQUE_PROPOSAL = """
+SELECT COUNT(*) FROM information_schema.statistics
+WHERE table_schema=DATABASE() AND table_name='ai_strategy_recommendation'
+ AND index_name='uk_strategy_recommendation_proposal' AND non_unique=0
+ AND column_name='move_proposal_id' AND seq_in_index=1
+"""
+
 V15_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='15' AND success=1")
 V15_STRATEGY_TABLES = """
@@ -179,6 +192,13 @@ def evaluate(phase, query_count, health_base=None, health_check=check_health):
             raise PreflightError("V15 organizing strategy tables missing")
         if query_count(V15_UNIQUE_RUN_FILE, "unique organize run file") != 1:
             raise PreflightError("V15 strategy run uniqueness index missing")
+        if query_count(V16_INSTALLED, "Flyway V16") != 1:
+            raise PreflightError("V16 recommendation feedback migration has not been applied")
+        if query_count(V16_RECOMMENDATION_TABLE, "strategy recommendation table") != 1:
+            raise PreflightError("V16 recommendation feedback table missing")
+        if query_count(V16_UNIQUE_PROPOSAL, "unique AI strategy proposal") != 1:
+            raise PreflightError("V16 strategy feedback unique key missing")
+        counts["ai_strategy_feedback_schema"] = "VERIFIED"
         counts["organizing_strategy_schema"] = "VERIFIED"
         counts["ai_workflow_schema"] = "VERIFIED"
         if health_base:

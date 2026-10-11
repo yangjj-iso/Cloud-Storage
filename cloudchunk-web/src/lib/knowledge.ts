@@ -111,6 +111,29 @@ export interface OrganizeRun {
   expiresAt: string; matched: number; blocked: number; steps: OrganizeStep[]; events: OrganizeAudit[];
 }
 
+export type StrategyDecision = 'PENDING' | 'ACCEPTED' | 'REJECTED';
+export type StrategyRejectReason = 'WRONG_FOLDER' | 'WRONG_CATEGORY' | 'INSUFFICIENT_CONTEXT' | 'OTHER';
+export interface StrategyRecommendation {
+  id: string;
+  templateId: string;
+  templateName: string;
+  destinationName: string;
+  userFileId: string;
+  fileName: string;
+  proposalId: string;
+  proposalExpiresAt: string;
+  state: StrategyDecision;
+  feedbackCode: string | null;
+  createdAt: string;
+}
+export interface StrategyFeedbackQuality {
+  accepted: number;
+  rejected: number;
+  unrated: number;
+  acceptanceRatio: number | null;
+  window: string;
+  note: string;
+}
 export interface AutoAskResponse {
   response: AnswerResponse;
   retrievalMode: SearchResult['mode'];
@@ -148,6 +171,17 @@ export interface BatchIndexResult { accepted: number; maxBatchSize: number }
 export interface ResearchBrief { evidence: Evidence[]; mode: 'EXACT_AUTHORIZED_EXCERPTS'; complete: boolean }
 
 export const knowledgeApi = {
+  strategyRecommend: (source: SourceRef, templateIds: string[], consent: boolean, signal: AbortSignal) =>
+    request<StrategyRecommendation>('/assistant/strategy/recommend', signal, {source,templateIds,consent}),
+  strategyFeedback: (id: string, decision: Exclude<StrategyDecision,'PENDING'>,
+                     reasonCode: 'USEFUL' | StrategyRejectReason, signal: AbortSignal) =>
+    request<StrategyRecommendation>('/assistant/strategy/recommendations/'+encodeURIComponent(id)+'/feedback',
+      signal,{decision,reasonCode,confirmed:true}),
+  strategyRecommendationHistory: (signal: AbortSignal) =>
+    request<StrategyRecommendation[]>('/assistant/strategy/recommendations', signal),
+  strategyFeedbackQuality: (signal: AbortSignal) =>
+    request<StrategyFeedbackQuality>('/assistant/strategy/quality', signal),
+
   organizationTemplates: (signal: AbortSignal) =>
     request<OrganizeTemplate[]>('/organize/templates',signal),
   createOrganizationTemplate: (name: string, mimeCategory: OrganizeMimeCategory,

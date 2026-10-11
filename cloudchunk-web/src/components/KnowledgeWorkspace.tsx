@@ -8,6 +8,7 @@ import { AiUsageBar } from './AiUsageBar';
 import { VectorHealthStrip } from './VectorHealthStrip';
 import { AiAgentHistory } from './AiAgentHistory';
 import { BatchMovePanel } from './BatchMovePanel';
+import { AiStrategyRecommendationPanel } from './AiStrategyRecommendationPanel';
 import { RenameAgentPanel } from './RenameAgentPanel';
 import { MoveAgentPanel } from './MoveAgentPanel';
 import { ResearchBriefPanel } from './ResearchBriefPanel';
@@ -195,6 +196,7 @@ export function KnowledgeWorkspace({ initialQuery = '', focusTick = 0 }: { initi
               {results.hasMore && <p className="kw-footnote">当前显示前 20 个匹配片段，还有更多结果。请使用更具体的关键词；此结果不代表全量统计。</p>}
             </div>}
             {results && results.evidence.length > 0 && <ResearchBriefPanel key={'brief-'+searched} results={results} query={searched} onSourceOpen={setSelection} />}
+            {results && results.evidence.length > 0 && <AiStrategyRecommendationPanel key={'strategy-'+searched} results={results} />}
             {results && results.evidence.length > 0 && <BatchMovePanel key={'batch-'+searched} results={results} />}
             {results && results.evidence.length > 0 && <AssistantPanel key={searched} results={results} onSourceOpen={setSelection} />}
           </> : <>

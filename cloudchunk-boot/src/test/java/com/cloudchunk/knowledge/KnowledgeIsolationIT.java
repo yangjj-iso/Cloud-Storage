@@ -30,12 +30,13 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 15,"V15 organizing template schema must execute on fresh MySQL");
+        assertTrue(result.migrationsExecuted >= 16,"V16 strategy recommendation feedback migration must execute on fresh MySQL");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
+        jdbc.update("DELETE FROM ai_strategy_recommendation");
         jdbc.update("DELETE FROM ai_organize_run_event");
         jdbc.update("DELETE FROM ai_organize_run_step");
         jdbc.update("DELETE FROM ai_organize_run");
@@ -57,6 +58,90 @@ class KnowledgeIsolationIT {
     private void publish(KnowledgeIndexStore.Claim c,String text) {
         tx.executeWithoutResult(s -> index.publish(c,text,"READY",null));
     }
+    @Test void aiStrategyRecommendationChecksTemplateOwnershipBeforeAgentAndFeedbackIsPrivate() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Research',1,0)");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (201,2,'PrivateFolder',1,0)");
+        var move=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var strategy=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+                jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class));
+        var template=strategy.create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Sort text notes","TEXT","200"));
+        var foreign=strategy.create(2,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Other owner's folder","TEXT","201"));
+        var claim=claim();publish(claim,"Text describing safe data recovery.");
+        when(move.capabilities()).thenReturn(
+                new com.cloudchunk.core.knowledge.AiMoveAgentService.Capabilities(
+                    true,"SINGLE_FILE_MOVE_WITH_CONFIRMATION"));
+        String proposalId="11111111-1111-4111-8111-111111111111";
+        when(move.suggest(eq(1L),any())).thenAnswer(inv->{
+            var request=inv.getArgument(1,com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest.class);
+            assertEquals(java.util.List.of(200L),request.candidateFolderIds());
+            assertTrue(request.consent());
+            insertMoveProposal(proposalId,1,101,"Alice.txt");
+            jdbc.update("UPDATE ai_move_proposal SET destination_id=200,destination_name='Research' WHERE id=?",proposalId);
+            return new com.cloudchunk.core.knowledge.AiMoveAgentService.Proposal(
+                    proposalId,"101","Alice.txt",0,200L,"Research","2099-01-01T00:00:00","PENDING");
+        });
+        var ai=new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(jdbc,service,move);
+        var ref=new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",claim.generation(),0);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.suggest(1,new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                        ref,java.util.List.of(template.id(),foreign.id()),true)));
+        verify(move,never()).suggest(anyLong(),any());
+
+        var recommendation=ai.suggest(1,
+                new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                    ref,java.util.List.of(template.id()),true));
+        assertEquals(template.id(),recommendation.templateId());
+        assertEquals("PENDING",recommendation.state());
+        assertEquals(1,ai.quality(1).unrated());
+        assertEquals(1,ai.recent(1).size());
+        assertTrue(ai.recent(2).isEmpty());
+        assertEquals(0,ai.quality(2).unrated());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.rate(2,recommendation.id(),
+                    new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                        "ACCEPTED","USEFUL",true)));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.rate(1,recommendation.id(),
+                    new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                        "REJECTED","anything raw",true)));
+        var rated=ai.rate(1,recommendation.id(),
+                new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                    "REJECTED","WRONG_FOLDER",true));
+        assertEquals("REJECTED",rated.state());
+        assertEquals("WRONG_FOLDER",rated.feedbackCode());
+        assertEquals(1,ai.quality(1).rejected());
+        assertNull(ai.quality(1).acceptanceRatio());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.rate(1,recommendation.id(),
+                    new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                        "ACCEPTED","USEFUL",true)));
+        // Feedback and the template recommendation never call UserFileService.move.
+        verify(move,times(1)).suggest(eq(1L),any());
+        jdbc.update("UPDATE user_file SET status=1 WHERE id=101");
+        assertTrue(ai.recent(1).isEmpty());
+    }
+
+    @Test void aiStrategyRecommendationRejectsCategoryMismatchBeforeModelAndNoAuditRowWritten() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Research',1,0)");
+        var policy=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+                jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class))
+                .create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                        "Only PDFs","PDF","200"));
+        var claim=claim();publish(claim,"Some text content");
+        var move=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        when(move.capabilities()).thenReturn(
+                new com.cloudchunk.core.knowledge.AiMoveAgentService.Capabilities(true,"MOVE"));
+        var ai=new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(jdbc,service,move);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.suggest(1,new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                    new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",claim.generation(),0),
+                    java.util.List.of(policy.id()),true)));
+        verify(move,never()).suggest(anyLong(),any());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_strategy_recommendation",Integer.class));
+    }
+
     @Test void organizingTemplateSimulationBlocksCrossAccountAndRequiresSeparateApproval() {
         jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Organized',1,0)");
         var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);

@@ -172,6 +172,7 @@ npm run dev
 - [M4.0 AI-Native 智能工作台](./docs/32-ai-native-workspace.md)：独立 AI 入口、全局快捷检索、受控批量索引、引用复核及研究摘录导出。
 - [M4.1 多步骤 Agent 工作流](./docs/33-reviewed-agent-workflows.md)：持久化移动计划、顺序审批、单项执行、撤销与事务审计。
 - [M4.2 智能整理策略与冲突模拟](./docs/34-organizing-templates.md)：保存文件类型规则、只读冲突预览、逐项审批执行与 Flyway V15 安全门禁。
+- [M4.3 AI 策略推荐与反馈闭环](./docs/35-ai-strategy-feedback.md)：一次性授权模型推荐已保存的规则，私有反馈分类、30 日统计和 Flyway V16 门禁。
 
 ## 验证
 
