@@ -100,7 +100,7 @@ These timestamps represent **journal writes**, not proven user-visible outage ti
 def create(journal, output):
     data = derive(journal)
     output = incident.path_allowed(output)
-    if output.resolve(strict=False).is_relative_to(ROOT.resolve()):
+    if output.resolve(strict=False).is_relative_to(incident.ROOT.resolve()):
         raise ReportError("OUTPUT_INSIDE_REPOSITORY")
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
         raise ReportError("OUTPUT_MUST_BE_NEW_EXTERNAL_FILE")
