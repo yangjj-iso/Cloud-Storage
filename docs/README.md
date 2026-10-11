@@ -29,6 +29,7 @@
 | [M3.6 P1 依赖韧性](./28-dependency-resilience.md) | 管理员只读运维状态、MinIO/MQ/AI 故障注入回归 |
 | [M3.7 生产韧性验收](./29-resilience-acceptance.md) | 隔离环境真实依赖停机/恢复、Alertmanager 路由检查与链式审计 |
 | [M3.8 SLO 与事件闭环](./30-operations-slo-incident.md) | 只读观察指标、活动告警与运维审计状态机 |
+| [M3.9 业务 SLI 与故障复盘](./31-business-sli-postmortem.md) | 业务口径的监控与告警、审计式复盘草稿 |
 | [08 基准测试与量化边界](./08-benchmark-metrics.md) | JMH、k6、Shell 脚本与指标解释 |
 | [前端 README](../cloudchunk-web/README.md) | Web 功能覆盖、开发代理和构建 |
 | [压测脚本 README](../deploy/bench/README.md) | k6/Shell 命令、认证和环境变量 |

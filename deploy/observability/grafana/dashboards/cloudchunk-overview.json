@@ -327,6 +327,174 @@
       ],
       "title": "1 小时错误预算燃烧（99.9% 目标）",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "cloudchunk:business:upload_merge_error_ratio10m",
+          "legendFormat": "上传合并服务器失败率（10 分钟）",
+          "refId": "A"
+        }
+      ],
+      "title": "上传合并服务器失败率（10 分钟）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "id": 13,
+      "targets": [
+        {
+          "expr": "cloudchunk:business:download_stream_failure_ratio10m",
+          "legendFormat": "下载流失败率（10 分钟）",
+          "refId": "A"
+        }
+      ],
+      "title": "下载流失败率（10 分钟）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "id": 14,
+      "targets": [
+        {
+          "expr": "cloudchunk:business:ai_fallback_ratio10m",
+          "legendFormat": "AI 检索降级率（10 分钟）",
+          "refId": "A"
+        }
+      ],
+      "title": "AI 检索降级率（10 分钟）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 40
+      },
+      "id": 15,
+      "targets": [
+        {
+          "expr": "cloudchunk_business_async_available_recent",
+          "legendFormat": "异步完成态文件（最近更新 24 小时）",
+          "refId": "A"
+        }
+      ],
+      "title": "异步完成态文件（最近更新 24 小时）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 40
+      },
+      "id": 16,
+      "targets": [
+        {
+          "expr": "cloudchunk_business_async_broken_recent",
+          "legendFormat": "异步损坏态文件（最近更新 24 小时）",
+          "refId": "A"
+        }
+      ],
+      "title": "异步损坏态文件（最近更新 24 小时）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 40
+      },
+      "id": 17,
+      "targets": [
+        {
+          "expr": "cloudchunk_business_async_outbox_stale and on() (cloudchunk_business_async_sample_valid == 1)",
+          "legendFormat": "超时 Outbox 任务（含采样有效性）",
+          "refId": "A"
+        }
+      ],
+      "title": "超时 Outbox 任务（含采样有效性）",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -334,7 +502,9 @@
   "tags": [
     "cloudchunk",
     "observability",
-    "m3.6"
+    "m3.6",
+    "m3.9",
+    "business-sli"
   ],
   "templating": {
     "list": []
@@ -346,5 +516,5 @@
   "timezone": "browser",
   "title": "CloudChunk 运行总览",
   "uid": "cloudchunk-overview",
-  "version": 3
+  "version": 4
 }

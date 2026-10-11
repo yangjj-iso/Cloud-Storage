@@ -1,4 +1,4 @@
-name: M3.8 SLO and incident release gates
+name: M3.9 business SLI and postmortem gates
 on:
   pull_request:
     branches: [main]
@@ -83,7 +83,7 @@ jobs:
         run: |
           docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
-            prom/prometheus:v2.55.1 check rules /etc/cloudchunk-observability/rules/cloudchunk-alerts.yml
+            prom/prometheus:v2.55.1 check rules /etc/cloudchunk-observability/rules/cloudchunk-alerts.yml /etc/cloudchunk-observability/rules/business-sli.yml
           ci_token="$(mktemp)"
           trap 'rm -f "$ci_token"' EXIT
           printf 'ci-test-scrape-token-nonsecret' > "$ci_token"
