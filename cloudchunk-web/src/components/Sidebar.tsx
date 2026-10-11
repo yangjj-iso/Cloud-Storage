@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { MaterialIcon } from './ui/MaterialIcon';
 
 const mainItems: Array<{ id: View; label: string; icon: string }> = [
+  { id: 'ai', label: 'AI 智能工作台', icon: 'auto_awesome' },
   { id: 'upload', label: '上传中心', icon: 'cloud_upload' },
   { id: 'drive', label: '我的云盘', icon: 'folder_shared' },
   { id: 'files', label: '文件列表', icon: 'list_alt' },
@@ -43,7 +44,7 @@ export function Sidebar() {
         </span>
         <span>
           <span className="block text-[24px] font-bold leading-7 tracking-[-0.025em] text-primary">CloudChunk</span>
-          <span className="block text-label-sm text-on-surface-variant">个人云存储</span>
+          <span className="block text-label-sm text-on-surface-variant">AI-Native 云存储</span>
         </span>
       </button>
 

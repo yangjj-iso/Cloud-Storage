@@ -4,6 +4,7 @@ import com.cloudchunk.common.model.R;
 import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.knowledge.KnowledgeModels.*;
 import com.cloudchunk.core.knowledge.KnowledgeService;
+import com.cloudchunk.core.knowledge.ResearchBriefService;
 import com.cloudchunk.core.knowledge.GroundedAnswerService;
 import com.cloudchunk.core.knowledge.SemanticIndexService;
 import com.cloudchunk.core.knowledge.HybridSearchService;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/knowledge")
 public class KnowledgeController {
     private final KnowledgeService service;
+    @Autowired private ResearchBriefService researchBrief;
     private final GroundedAnswerService assistant;
     private final SemanticIndexService semantic;
     private final HybridSearchService hybrid;
@@ -53,11 +55,28 @@ public class KnowledgeController {
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
     public record SearchRequest(String query) {}
+    public record BatchIndexRequest(java.util.List<String> userFileIds) {}
 
     @GetMapping("/documents")
     public ResponseEntity<R<Library>> library(@RequestParam(defaultValue="1") int page) {
         return noStore(service.library(UserContext.requireUserId(), page));
     }
+    public record ResearchBriefRequest(java.util.List<SourceRef> sources) {}
+
+    @PostMapping("/research/brief")
+    public ResponseEntity<R<ResearchBriefService.Brief>> researchBrief(@RequestBody ResearchBriefRequest request) {
+        if (request == null) throw com.cloudchunk.common.exception.BizException.of(
+                com.cloudchunk.common.exception.ErrorCode.INVALID_PARAMETER);
+        return noStore(researchBrief.prepare(UserContext.requireUserId(), request.sources()));
+    }
+
+    @PostMapping("/documents/index/batch")
+    public ResponseEntity<R<BatchIndexResult>> indexBatch(@RequestBody BatchIndexRequest request) {
+        if (request == null) throw com.cloudchunk.common.exception.BizException.of(
+                com.cloudchunk.common.exception.ErrorCode.INVALID_PARAMETER);
+        return noStore(service.requestIndexBatch(UserContext.requireUserId(), request.userFileIds()));
+    }
+
     @PostMapping("/search")
     public ResponseEntity<R<SearchResult>> search(@RequestBody SearchRequest request) {
         long userId=UserContext.requireUserId();

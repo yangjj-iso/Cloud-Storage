@@ -10,6 +10,7 @@ import { AiAgentHistory } from './AiAgentHistory';
 import { BatchMovePanel } from './BatchMovePanel';
 import { RenameAgentPanel } from './RenameAgentPanel';
 import { MoveAgentPanel } from './MoveAgentPanel';
+import { ResearchBriefPanel } from './ResearchBriefPanel';
 
 type Selection = { userFileId: string; fileName: string; generation: number; chunkIndex?: number };
 
@@ -28,7 +29,7 @@ function HighlightMatch({ text, query }: { text: string; query: string }) {
 const readable = (d: KnowledgeDocument) => d.status === 'READY' || d.status === 'PARTIAL';
 const errorMessage = (e: unknown) => e instanceof Error ? e.message : '请求失败，请重试';
 
-export function KnowledgeWorkspace() {
+export function KnowledgeWorkspace({ initialQuery = '', focusTick = 0 }: { initialQuery?: string; focusTick?: number }) {
   const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
   const [library, setLibrary] = useState<Library | null>(null);
@@ -77,6 +78,10 @@ export function KnowledgeWorkspace() {
     return () => controller.abort();
   }, []);
   useEffect(() => () => { searchRequest.current?.abort(); indexRequest.current?.abort(); }, []);
+  useEffect(() => {
+    if (initialQuery) setQuery(initialQuery.slice(0, 100));
+    searchInput.current?.focus();
+  }, [initialQuery, focusTick]);
 
   const search = async (event: FormEvent) => {
     event.preventDefault();
@@ -189,6 +194,7 @@ export function KnowledgeWorkspace() {
               </button>)}
               {results.hasMore && <p className="kw-footnote">当前显示前 20 个匹配片段，还有更多结果。请使用更具体的关键词；此结果不代表全量统计。</p>}
             </div>}
+            {results && results.evidence.length > 0 && <ResearchBriefPanel key={'brief-'+searched} results={results} query={searched} onSourceOpen={setSelection} />}
             {results && results.evidence.length > 0 && <BatchMovePanel key={'batch-'+searched} results={results} />}
             {results && results.evidence.length > 0 && <AssistantPanel key={searched} results={results} onSourceOpen={setSelection} />}
           </> : <>

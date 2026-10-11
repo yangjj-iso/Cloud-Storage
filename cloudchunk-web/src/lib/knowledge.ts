@@ -100,7 +100,14 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown, ove
   }
   return result.data;
 }
+export interface BatchIndexResult { accepted: number; maxBatchSize: number }
+export interface ResearchBrief { evidence: Evidence[]; mode: 'EXACT_AUTHORIZED_EXCERPTS'; complete: boolean }
+
 export const knowledgeApi = {
+  researchBrief: (sources: SourceRef[], signal: AbortSignal) =>
+    request<ResearchBrief>('/research/brief', signal, { sources }),
+  indexBatch: (userFileIds: string[], signal: AbortSignal) =>
+    request<BatchIndexResult>('/documents/index/batch', signal, { userFileIds }),
   library: (page: number, signal: AbortSignal) => request<Library>(`/documents?page=${page}`, signal),
   search: (query: string, signal: AbortSignal) => request<SearchResult>('/search', signal, { query }),
   semanticCapabilities: (signal: AbortSignal) =>

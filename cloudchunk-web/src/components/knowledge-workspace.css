@@ -162,3 +162,18 @@
   border-radius:9px; background:#fff; font-size:12px; }
 .kw-batch-preview-item strong { font-size:13px; }
 .kw-batch-preview-item .kw-consent { margin-top:3px; }
+
+/* M4.0 exact-evidence research board */
+.kw-research{padding:20px;margin:18px 0;border:1px solid #cfe3da;border-radius:16px;background:#f7fbf9}
+.kw-research .kw-section-title{align-items:start;margin-bottom:15px}
+.kw-research-list{max-height:300px;overflow:auto;border:1px solid #e0ebe5;border-radius:11px;background:#fff}
+.kw-research-row{display:flex;align-items:center;gap:12px;min-height:58px;padding:10px 13px;border-bottom:1px solid #edf2ef;font-size:12px;cursor:pointer}
+.kw-research-row:last-child{border:0}.kw-research-row:hover{background:#f8fbf8}
+.kw-research-row>input{accent-color:#327760;width:16px;height:16px;flex-shrink:0}
+.kw-research-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.kw-research-name small{display:block;margin-top:4px;color:#718b82;font-weight:400}
+.kw-research-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px}
+.kw-research-actions>span{flex:1;font-size:12px;color:#577666}
+.kw-research-preview{padding:14px;margin-top:12px;background:#fff;border-radius:10px;border:1px solid #dfebe4;font-size:12px;line-height:1.7}
+.kw-research-preview>strong{display:block;margin-bottom:8px;color:#377662}
+.kw-research-preview>p{margin:7px 0;color:#697b76;overflow-wrap:anywhere}

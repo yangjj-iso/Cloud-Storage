@@ -63,7 +63,14 @@ export function Topbar() {
   return (
     <>
     <header className="fixed right-0 top-0 z-40 hidden h-16 w-[calc(100%-260px)] items-center justify-between border-b border-outline-variant bg-surface/90 px-lg shadow-sm backdrop-blur-md md:flex">
-      {view === 'drive' ? (
+      {view === 'ai' ? (
+        <button type="button" onClick={() => window.dispatchEvent(new Event('cloudchunk:focus-ai-search'))}
+          className="flex h-10 w-[450px] max-w-full items-center gap-md rounded-xl border border-outline-variant bg-surface-container-lowest px-md text-left text-body-md text-on-surface-variant hover:border-primary shadow-sm">
+          <MaterialIcon className="text-[21px]">search</MaterialIcon>
+          <span className="flex-1">搜索我的知识资料…</span>
+          <kbd className="rounded border border-outline-variant bg-surface-container px-xs py-1 text-label-sm">⌘ / Ctrl K</kbd>
+        </button>
+      ) : view === 'drive' ? (
         <div className="flex items-center gap-sm text-body-md font-semibold text-on-surface-variant">
           <MaterialIcon className="text-[19px]">home</MaterialIcon><span>根目录</span>
         </div>
