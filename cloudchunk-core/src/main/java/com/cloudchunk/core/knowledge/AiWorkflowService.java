@@ -185,6 +185,9 @@ public class AiWorkflowService {
         requireConfirm(request);
         Plan plan=findPlan(userId,id,true);
         ensureActive(plan);
+        if (steps(id).stream().noneMatch(step ->
+                "PENDING".equals(step.state()) || "APPROVED".equals(step.state())))
+            throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
         if (jdbc.update("""
             UPDATE ai_agent_workflow SET status='CANCELLED'
             WHERE id=? AND user_id=? AND status='ACTIVE'
