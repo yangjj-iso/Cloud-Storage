@@ -28,7 +28,7 @@ PROBES = {
 }
 ALLOWED_IMAGES = {
     "redis": "redis:7-alpine",
-    "minio": "minio/minio:latest",
+    "minio": "docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z",
     "rmq-namesrv": "apache/rocketmq:5.2.0",
 }
 HELPER = "busybox:1.36.1"
