@@ -38,7 +38,7 @@ public class AiStrategyPrivacyGovernanceService {
     /** Never record a source pointer, model response, endpoint or raw error. */
     public void record(long userId,String event,int count) {
         if(userId<=0 || count<1 || count>8 || !("CONSENT_GRANTED".equals(event) ||
-                "RECOMMENDED".equals(event) || "MODEL_FAILED".equals(event)))
+                "RECOMMENDED".equals(event) || "REQUEST_FAILED".equals(event)))
             throw BizException.of(ErrorCode.INVALID_PARAMETER);
         jdbc.update("""
             INSERT INTO ai_strategy_consent_audit(user_id,event_code,candidate_count)
