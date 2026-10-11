@@ -45,6 +45,12 @@ services:
       - ./observability/rules:/etc/prometheus/rules:ro
       - ${METRICS_TOKEN_FILE:?provide_private_token_file}:/etc/prometheus/metrics-token:ro
       - prometheus-data:/prometheus
+  alertmanager:
+    image: ${CC_ALERTMANAGER_IMAGE:?pin_alertmanager_digest}
+    ports: !reset []
+    volumes: !override
+      - ${ALERTMANAGER_CONFIG_FILE:?provide_approved_alertmanager_config}:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
   grafana:
     image: ${CC_GRAFANA_IMAGE:?pin_grafana_digest}
     ports: !reset []

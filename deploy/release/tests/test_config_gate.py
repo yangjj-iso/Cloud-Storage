@@ -16,6 +16,19 @@ class ConfigGateTest(unittest.TestCase):
         self.token_file = pathlib.Path(self.temp.name) / "metrics-token"
         self.token_file.write_text("sample-scrape-only-ci-token-long-12345")
         self.token_file.chmod(0o600)
+        self.alert_config = pathlib.Path(self.temp.name) / "alertmanager.yml"
+        self.alert_config.write_text("""global:
+  resolve_timeout: 5m
+route:
+  receiver: approved-webhook
+  group_by: ["alertname"]
+receivers:
+  - name: approved-webhook
+    webhook_configs:
+      - url: https://alerting.internal.example.com/cloudchunk
+        send_resolved: true
+""")
+        self.alert_config.chmod(0o600)
         self.good = {
             "MYSQL_ROOT_PASSWORD": "very-long-db-passphrase-1",
             "MINIO_ROOT_PASSWORD": "separate-long-object-secret-2",
@@ -23,6 +36,7 @@ class ConfigGateTest(unittest.TestCase):
             "WS_ALLOWED_ORIGINS": "https://files.example.com",
             "PROMETHEUS_PUBLIC": "false",
             "GRAFANA_ADMIN_PASSWORD": "strong-ci-grafana-password-12345",
+            "ALERTMANAGER_CONFIG_FILE": str(self.alert_config),
             "METRICS_SCRAPE_TOKEN": "sample-scrape-only-ci-token-long-12345",
             "METRICS_TOKEN_FILE": str(self.token_file),
         }
@@ -58,6 +72,15 @@ class ConfigGateTest(unittest.TestCase):
         with self.assertRaises(gate.GateError):
             gate.check_env(bad, production=True)
         self.token_file.chmod(0o644)
+        with self.assertRaises(gate.GateError):
+            gate.check_env(self.good, production=True)
+
+    def test_production_alertmanager_config_must_be_external_private_and_routed(self):
+        self.alert_config.chmod(0o644)
+        with self.assertRaises(gate.GateError):
+            gate.check_env(self.good, production=True)
+        self.alert_config.chmod(0o600)
+        self.alert_config.write_text("route:\\n  receiver: unconfigured\\nreceivers:\\n  - name: unconfigured\\n")
         with self.assertRaises(gate.GateError):
             gate.check_env(self.good, production=True)
 

@@ -64,16 +64,30 @@ jobs:
           chmod 600 "$tokenfile"
           printf 'METRICS_SCRAPE_TOKEN=%s\nMETRICS_TOKEN_FILE=%s\n' "$token" "$tokenfile" >> "$tmp"
           printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "strong-ci-grafana-password-12345" >> "$tmp"
+          alertcfg="$(mktemp)"
+          trap 'rm -f "$tmp" "$tokenfile" "$alertcfg"' EXIT
+          cp deploy/observability/alertmanager.prod.template.yml "$alertcfg"
+          sed -i 's/replace-with-approved-alert-endpoint.invalid/ci-only-alert-router.example.com/' "$alertcfg"
+          chmod 600 "$alertcfg"
+          printf 'ALERTMANAGER_CONFIG_FILE=%s\\n' "$alertcfg" >> "$tmp"
           digest="$(printf 'a%.0s' {1..64})"
-          for key in CLOUDCHUNK_API_IMAGE CLOUDCHUNK_WEB_IMAGE CC_MYSQL_IMAGE CC_REDIS_IMAGE CC_RMQ_IMAGE CC_RMQ_DASHBOARD_IMAGE CC_MINIO_IMAGE CC_QDRANT_IMAGE CC_JAEGER_IMAGE CC_PROMETHEUS_IMAGE CC_GRAFANA_IMAGE; do
+          for key in CLOUDCHUNK_API_IMAGE CLOUDCHUNK_WEB_IMAGE CC_MYSQL_IMAGE CC_REDIS_IMAGE CC_RMQ_IMAGE CC_RMQ_DASHBOARD_IMAGE CC_MINIO_IMAGE CC_QDRANT_IMAGE CC_JAEGER_IMAGE CC_PROMETHEUS_IMAGE CC_GRAFANA_IMAGE CC_ALERTMANAGER_IMAGE; do
             printf '%s=registry.invalid/%s@sha256:%s\n' "$key" "${key,,}" "$digest" >> "$tmp"
           done
           docker compose --env-file "$tmp" -f deploy/docker-compose.yml -f deploy/docker-compose.prod.example.yml --profile app --profile vector --profile observability config --format json |
             python3 deploy/release/config_gate.py --mode production --env-file "$tmp" --compose-config -
 
-      - name: Validate Prometheus alert rule syntax
+      - name: Validate production Prometheus and Alertmanager configuration syntax
         run: |
-          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/observability/rules:/rules:ro" prom/prometheus:v2.55.1 check rules /rules/cloudchunk-alerts.yml
+          docker run --rm --entrypoint /bin/promtool \
+            -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
+            prom/prometheus:v2.55.1 check rules /etc/cloudchunk-observability/rules/cloudchunk-alerts.yml
+          docker run --rm --entrypoint /bin/promtool \
+            -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
+            prom/prometheus:v2.55.1 check config /etc/cloudchunk-observability/prometheus.prod.yml
+          docker run --rm --entrypoint /bin/amtool \
+            -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
+            prom/alertmanager:v0.27.0 check-config /etc/cloudchunk-observability/alertmanager.dev.yml /etc/cloudchunk-observability/alertmanager.prod.template.yml
 
   build-verification:
     name: backend and frontend build

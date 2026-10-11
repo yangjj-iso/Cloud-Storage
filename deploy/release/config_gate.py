@@ -19,8 +19,8 @@ CORE = {"MYSQL_ROOT_PASSWORD", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD",
 BAD_SECRETS = {"root", "minioadmin", "password", "changeme", "change-me",
                "secret", "admin", "123456", "example", "test"}
 DISALLOWED_PORT_SERVICES = {"mysql", "redis", "rmq-namesrv", "rmq-broker",
-    "rmq-dashboard", "minio", "api", "qdrant", "prometheus", "grafana", "jaeger"}
-REQUIRED_SERVICES = {"mysql", "redis", "rmq-broker", "minio", "api", "worker", "web"}
+    "rmq-dashboard", "minio", "api", "qdrant", "prometheus", "grafana", "jaeger", "alertmanager"}
+REQUIRED_SERVICES = {"mysql", "redis", "rmq-broker", "minio", "api", "worker", "web", "alertmanager"}
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 ENV_KEY = re.compile(r"[A-Z][A-Z0-9_]*")
 
@@ -101,6 +101,23 @@ def check_env(values, production=False):
         raise GateError("cannot read metrics token file") from exc
     if not hmac.compare_digest(content, values["METRICS_SCRAPE_TOKEN"]):
         raise GateError("metrics token file does not match configured token")
+    # Prevent silent production rollout without a real, externally approved
+    # Alertmanager receiver configuration. Does not prove delivery; drill required.
+    alert_path = pathlib.Path(values.get("ALERTMANAGER_CONFIG_FILE", ""))
+    if (not alert_path.is_absolute() or not alert_path.is_file() or alert_path.is_symlink()
+            or pathlib.Path(__file__).resolve().parents[2] in alert_path.resolve().parents):
+        raise GateError("ALERTMANAGER_CONFIG_FILE must be a private external file")
+    if stat.S_IMODE(alert_path.stat().st_mode) & 0o077:
+        raise GateError("Alertmanager config file must be private")
+    try:
+        alert_contents = alert_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise GateError("unable to read Alertmanager config") from exc
+    if (len(alert_contents) < 100 or "unconfigured" in alert_contents.lower()
+            or "replace-with-approved" in alert_contents.lower()
+            or "webhook_configs:" not in alert_contents
+            or "https://" not in alert_contents):
+        raise GateError("Alertmanager production receiver is not explicitly configured")
     origins = values["WS_ALLOWED_ORIGINS"].split(",")
     if not origins or any(not is_https_origin(v.strip()) for v in origins):
         raise GateError("WS_ALLOWED_ORIGINS must list explicit HTTPS origins")
