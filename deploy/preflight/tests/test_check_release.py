@@ -30,10 +30,14 @@ class ReleasePreflightTest(unittest.TestCase):
 
     def test_post_migration_requires_version_index_and_generated_column(self):
         good = {"duplicate names": 0, "Flyway failures": 0, "Flyway V13": 1,
-                "unique index": 1, "active name column": 1}
+                "unique index": 1, "active name column": 1,
+                "Flyway V14": 1, "workflow tables": 3, "unique workflow proposal": 1}
         self.assertEqual("VERIFIED",
             preflight.evaluate("ready", self.count(good))["database_namespace_constraint"])
-        for key in ("Flyway V13", "unique index", "active name column"):
+        self.assertEqual("VERIFIED",
+            preflight.evaluate("ready", self.count(good))["ai_workflow_schema"])
+        for key in ("Flyway V13", "unique index", "active name column",
+                    "Flyway V14", "workflow tables", "unique workflow proposal"):
             broken = dict(good, **{key: 0})
             with self.assertRaises(preflight.PreflightError):
                 preflight.evaluate("ready", self.count(broken))
