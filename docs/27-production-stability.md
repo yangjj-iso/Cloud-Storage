@@ -98,3 +98,8 @@ python3 -m unittest discover -s deploy/preflight/tests -v
 ```
 
 M3.6 P0 的 CI 仅验证逻辑、Compose 解析、Prometheus 规则语法、构建及合成数据恢复，不对真实生产运行故障切换、生产消息恢复或流量切换演练。生产启用还需要：外部审批体系、生产 Grafana 账户、Alertmanager 通知接线、私有 CI Runner、镜像 SBOM/签名验证、真实演练记录与按 SLO 校准阈值。Worker 本身无 Web 端口，不在当前 Prometheus API scrape 覆盖范围；Outbox 故障通过只读 SQL 计数纳入发布验收，Worker 指标独立 exporter 为 P1。P1 才扩展组件级 exporter、故障注入、运维控制台与灾备 RPO/RTO 量化。
+
+
+## M3.7 补充：Alertmanager 与验收证据
+
+生产告警不再仅止于 Prometheus 评估：生产 Compose 覆盖文件现在通过 `ALERTMANAGER_CONFIG_FILE` 挂载运维审批的私有告警接收配置。开发配置 `alertmanager.dev.yml` **故意丢弃通知**，不能据此宣布生产告警已接通。M3.7 的合成 Docker 测试只证明 Prometheus/Alertmanager 格式及隔离 Alertmanager→Webhook 消息传递；仍需运维使用真实目标接收方执行一次通知/升级链路演练。参见 [M3.7 验收](./29-resilience-acceptance.md)。

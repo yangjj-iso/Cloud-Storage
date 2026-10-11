@@ -26,6 +26,7 @@
 | [根 README](../README.md) | 环境要求、依赖启动、端口和前后端启动命令 |\n| [M3.5 正式发布准备](./26-release-readiness.md) | 配置门禁、备份/恢复演练、生产审批和回滚手册 |
 | [M3.6 生产稳定性](./27-production-stability.md) | 私有指标抓取、告警规则、发布后 SLO 门禁、安全回滚 |
 | [M3.6 P1 依赖韧性](./28-dependency-resilience.md) | 管理员只读运维状态、MinIO/MQ/AI 故障注入回归 |
+| [M3.7 生产韧性验收](./29-resilience-acceptance.md) | 隔离环境真实依赖停机/恢复、Alertmanager 路由检查与链式审计 |
 | [08 基准测试与量化边界](./08-benchmark-metrics.md) | JMH、k6、Shell 脚本与指标解释 |
 | [前端 README](../cloudchunk-web/README.md) | Web 功能覆盖、开发代理和构建 |
 | [压测脚本 README](../deploy/bench/README.md) | k6/Shell 命令、认证和环境变量 |
