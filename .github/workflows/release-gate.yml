@@ -1,4 +1,4 @@
-name: M3.6 release and stability gates
+name: M3.7 resilience release gates
 on:
   pull_request:
     branches: [main]
@@ -44,6 +44,8 @@ jobs:
         run: python3 deploy/release/config_gate.py --mode example --env-file deploy/.env.example
       - name: Check release, backup and restore unit tests
         run: python3 -m unittest discover -s deploy/release/tests -v
+      - name: Audit integrity and chaos topology unit tests
+        run: python3 -m unittest discover -s deploy/resilience/tests -v
       - name: Existing migration and smoke contract tests
         run: python3 -m unittest discover -s deploy/preflight/tests -v
       - name: Validate Compose syntax, all optional profiles
@@ -115,7 +117,7 @@ jobs:
   docker-restore-drill:
     name: isolated Docker restore smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,7 +125,9 @@ jobs:
       - name: Verify disposable Docker is available
         run: docker info
       - name: Restore synthetic SQL and cold volumes in isolated disposable Docker
-        run: python3 -m unittest discover -s deploy/release/docker_tests -v
+        run: python3 -m unittest discover -s deploy/release/docker_tests -p test_restore_docker.py -v
+      - name: Exercise isolated Redis, MinIO and RocketMQ outage/recovery
+        run: python3 -m unittest discover -s deploy/release/docker_tests -p test_dependency_chaos_docker.py -v
 
   # This job is opt-in and cannot deploy, migrate, back up or alter production.
   # Configure GitHub environment "production" with required reviewers and restrict refs.
