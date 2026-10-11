@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useAppStore } from '../store';
 import { knowledgeApi, statusLabels, type AssistantCapabilities, type KnowledgeDocument, type Library, type SemanticCapabilities } from '../lib/knowledge';
 import { MaterialIcon } from './ui/MaterialIcon';
 import { KnowledgeWorkspace } from './KnowledgeWorkspace';
@@ -22,7 +21,6 @@ export function AiHub({ focusTick }: { focusTick: number }) {
   const [tab, setTab] = useState<Tab>('overview');
   const [seed, setSeed] = useState('');
   const [searchTick, setSearchTick] = useState(0);
-  const showToast = useAppStore(s => s.showToast);
 
   useEffect(() => {
     if (focusTick === 0) return;
