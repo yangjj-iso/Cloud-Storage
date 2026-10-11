@@ -26,6 +26,12 @@ export function AiHub({ focusTick }: { focusTick: number }) {
   const [searchTick, setSearchTick] = useState(0);
 
   useEffect(() => {
+    const showStrategies = () => setTab('strategies');
+    window.addEventListener('cloudchunk:open-ai-strategies', showStrategies);
+    return () => window.removeEventListener('cloudchunk:open-ai-strategies', showStrategies);
+  }, []);
+
+  useEffect(() => {
     const focus = () => { setSeed(''); setTab('explore'); setSearchTick(v => v + 1); };
     window.addEventListener('cloudchunk:focus-ai-search', focus);
     return () => window.removeEventListener('cloudchunk:focus-ai-search', focus);
