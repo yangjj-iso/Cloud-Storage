@@ -7,6 +7,7 @@ import { useAppStore } from '../store';
 import type { AdminUserItem } from '../types';
 import { MaterialIcon } from './ui/MaterialIcon';
 import { SystemHealth } from './SystemHealth';
+import { AiFeedbackReviewAdminPanel } from './AiFeedbackReviewAdminPanel';
 
 export function AdminPanel() {
   const authUser = useAppStore((state) => state.authUser);
@@ -14,7 +15,7 @@ export function AdminPanel() {
   if (authUser?.role !== 'admin') {
     return <div className="flex min-h-[420px] items-center justify-center p-xl text-body-md text-on-surface-variant"><MaterialIcon className="mr-sm text-error">lock</MaterialIcon>仅管理员可以访问此页面</div>;
   }
-  if (adminTab === 'health') return <SystemHealth />;
+  if (adminTab === 'health') return <><SystemHealth /><AiFeedbackReviewAdminPanel /></>;
   if (adminTab === 'files') return <AdminFiles />;
   if (adminTab === 'settings') return <AdminSettings />;
   return <AdminUsers />;
