@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { knowledgeApi, type OrganizeTemplate, type SearchResult,
   type SourceRef, type StrategyRecommendation, type StrategyFeedbackQuality,
-  type StrategyRejectReason } from '../lib/knowledge';
+  type StrategyRejectReason, type StrategyConsentReceipt } from '../lib/knowledge';
 import { MaterialIcon } from './ui/MaterialIcon';
 
 const reasons: Array<{ id: StrategyRejectReason; label: string }> = [
@@ -25,6 +25,7 @@ export function AiStrategyRecommendationPanel({ results }: { results: SearchResu
   const [recommendation,setRecommendation] = useState<StrategyRecommendation | null>(null);
   const [history,setHistory] = useState<StrategyRecommendation[]>([]);
   const [quality,setQuality] = useState<StrategyFeedbackQuality | null>(null);
+  const [consents,setConsents] = useState<StrategyConsentReceipt[]>([]);
   const [reason,setReason] = useState<StrategyRejectReason>('WRONG_FOLDER');
   const [working,setWorking] = useState(false);
   const [error,setError] = useState('');
@@ -38,11 +39,13 @@ export function AiStrategyRecommendationPanel({ results }: { results: SearchResu
       knowledgeApi.organizationTemplates(controller.signal),
       knowledgeApi.strategyRecommendationHistory(controller.signal),
       knowledgeApi.strategyFeedbackQuality(controller.signal),
-    ]).then(([templatesResult,historyResult,qualityResult]) => {
+      knowledgeApi.strategyConsentHistory(controller.signal),
+    ]).then(([templatesResult,historyResult,qualityResult,consentResult]) => {
       if(controller.signal.aborted)return;
       setTemplates(templatesResult.status==='fulfilled' ? templatesResult.value : []);
       setHistory(historyResult.status==='fulfilled' ? historyResult.value : []);
       setQuality(qualityResult.status==='fulfilled' ? qualityResult.value : null);
+      setConsents(consentResult.status==='fulfilled' ? consentResult.value : []);
       if(templatesResult.status==='rejected')setError('整理模板暂不可用，请在「整理策略」中先保存个人规则。');
     });
     return () => controller.abort();
