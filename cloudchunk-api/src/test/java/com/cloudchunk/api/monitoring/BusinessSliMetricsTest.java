@@ -3,14 +3,13 @@ package com.cloudchunk.api.monitoring;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.assertj.core.api.Assertions.*;
 
 class BusinessSliMetricsTest {
     @Test void noHighCardinalityLabelsAndFallbacksAreCategorized() {
-        try (var registry = new SimpleMeterRegistry()) {
+        { var registry = new SimpleMeterRegistry();
             var metric = new BusinessSliMetrics(registry, mock(JdbcTemplate.class));
             metric.operation("upload_merge", "accepted");
             metric.operation("download_stream", "failed");
@@ -31,7 +30,7 @@ class BusinessSliMetricsTest {
 
     @Test void missingAsyncDataIsNeverTreatedAsZero() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        try (var registry = new SimpleMeterRegistry()) {
+        { var registry = new SimpleMeterRegistry();
             var metric = new BusinessSliMetrics(registry, jdbc);
             metric.sampleAsync();
             assertThat(registry.get("cloudchunk.business.async.sample.valid").gauge().value()).isZero();
