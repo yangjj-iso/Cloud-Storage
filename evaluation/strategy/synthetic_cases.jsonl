@@ -1,0 +1,12 @@
+{"id":"routine-01","eligible":true,"candidate_count":3,"expected":2,"model_output":"2 [S1]","scenario":"routine"}
+{"id":"routine-02","eligible":true,"candidate_count":3,"expected":1,"model_output":"1 [S1]","scenario":"routine"}
+{"id":"routine-03","eligible":true,"candidate_count":4,"expected":3,"model_output":"3 [S1]","scenario":"routine"}
+{"id":"routine-04","eligible":true,"candidate_count":2,"expected":1,"model_output":"1 [S1]","scenario":"routine"}
+{"id":"routine-05","eligible":true,"candidate_count":5,"expected":4,"model_output":"4 [S1]","scenario":"routine"}
+{"id":"routine-06","eligible":true,"candidate_count":8,"expected":7,"model_output":"7 [S1]","scenario":"routine"}
+{"id":"ambiguous-01","eligible":true,"candidate_count":3,"expected":2,"model_output":"1 [S1]","scenario":"ambiguous"}
+{"id":"ambiguous-02","eligible":true,"candidate_count":3,"expected":1,"model_output":"pick 1","scenario":"ambiguous"}
+{"id":"mismatch-01","eligible":false,"candidate_count":4,"expected":0,"model_output":null,"scenario":"mismatch"}
+{"id":"mismatch-02","eligible":false,"candidate_count":4,"expected":0,"model_output":null,"scenario":"mismatch"}
+{"id":"revoked-01","eligible":false,"candidate_count":2,"expected":0,"model_output":null,"scenario":"revoked"}
+{"id":"conflict-01","eligible":false,"candidate_count":2,"expected":0,"model_output":null,"scenario":"conflict"}
