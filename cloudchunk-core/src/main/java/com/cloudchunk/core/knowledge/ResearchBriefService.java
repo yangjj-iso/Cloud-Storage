@@ -28,7 +28,9 @@ public class ResearchBriefService {
         if (refs == null || refs.isEmpty() || refs.size() > 12)
             throw BizException.of(ErrorCode.INVALID_PARAMETER, "select 1-12 evidence pointers");
         Set<String> seen = new HashSet<>();
-        List<Evidence> fresh = new ArrayList<>();
+        record Pointer(long userFileId, long generation, int chunkIndex) {}
+        List<Pointer> pointers = new ArrayList<>();
+        // Validate the WHOLE set before reading any private document content.
         for (SourceRef ref : refs) {
             if (ref == null || ref.userFileId() == null
                     || !ref.userFileId().matches("[1-9][0-9]{0,18}")
@@ -41,7 +43,11 @@ public class ResearchBriefService {
             }
             String key = id + ":" + ref.generation() + ":" + ref.chunkIndex();
             if (!seen.add(key)) throw BizException.of(ErrorCode.INVALID_PARAMETER, "duplicate evidence");
-            Evidence evidence = knowledge.source(userId, id, ref.generation(), ref.chunkIndex());
+            pointers.add(new Pointer(id, ref.generation(), ref.chunkIndex()));
+        }
+        List<Evidence> fresh = new ArrayList<>();
+        for (Pointer pointer : pointers) {
+            Evidence evidence = knowledge.source(userId, pointer.userFileId(), pointer.generation(), pointer.chunkIndex());
             if (evidence == null) throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
             fresh.add(evidence);
         }
