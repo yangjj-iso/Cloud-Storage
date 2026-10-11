@@ -70,7 +70,7 @@ jobs:
         run: docker compose -f deploy/acceptance/compose.yml run --rm --no-deps acceptance
       - name: Bounded disposable-service diagnostics on failure
         if: failure()
-        run: docker compose -f deploy/acceptance/compose.yml logs --no-color --tail 80 api worker broker
+        run: bash deploy/acceptance/diagnostics.sh
       - name: Remove this run's containers and anonymous volumes
         if: always()
         env:
