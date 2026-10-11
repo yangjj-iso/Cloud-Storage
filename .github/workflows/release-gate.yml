@@ -1,4 +1,4 @@
-name: M3.6 release and stability gates
+name: M3.7 resilience release gates
 on:
   pull_request:
     branches: [main]
@@ -44,6 +44,8 @@ jobs:
         run: python3 deploy/release/config_gate.py --mode example --env-file deploy/.env.example
       - name: Check release, backup and restore unit tests
         run: python3 -m unittest discover -s deploy/release/tests -v
+      - name: Audit integrity and chaos topology unit tests
+        run: python3 -m unittest discover -s deploy/resilience/tests -v
       - name: Existing migration and smoke contract tests
         run: python3 -m unittest discover -s deploy/preflight/tests -v
       - name: Validate Compose syntax, all optional profiles
@@ -64,16 +66,36 @@ jobs:
           chmod 600 "$tokenfile"
           printf 'METRICS_SCRAPE_TOKEN=%s\nMETRICS_TOKEN_FILE=%s\n' "$token" "$tokenfile" >> "$tmp"
           printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "strong-ci-grafana-password-12345" >> "$tmp"
+          alertcfg="$(mktemp)"
+          trap 'rm -f "$tmp" "$tokenfile" "$alertcfg"' EXIT
+          cp deploy/observability/alertmanager.prod.template.yml "$alertcfg"
+          sed -i 's/replace-with-approved-alert-endpoint.invalid/ci-only-alert-router.example.com/' "$alertcfg"
+          chmod 600 "$alertcfg"
+          printf 'ALERTMANAGER_CONFIG_FILE=%s\n' "$alertcfg" >> "$tmp"
           digest="$(printf 'a%.0s' {1..64})"
-          for key in CLOUDCHUNK_API_IMAGE CLOUDCHUNK_WEB_IMAGE CC_MYSQL_IMAGE CC_REDIS_IMAGE CC_RMQ_IMAGE CC_RMQ_DASHBOARD_IMAGE CC_MINIO_IMAGE CC_QDRANT_IMAGE CC_JAEGER_IMAGE CC_PROMETHEUS_IMAGE CC_GRAFANA_IMAGE; do
+          for key in CLOUDCHUNK_API_IMAGE CLOUDCHUNK_WEB_IMAGE CC_MYSQL_IMAGE CC_REDIS_IMAGE CC_RMQ_IMAGE CC_RMQ_DASHBOARD_IMAGE CC_MINIO_IMAGE CC_QDRANT_IMAGE CC_JAEGER_IMAGE CC_PROMETHEUS_IMAGE CC_GRAFANA_IMAGE CC_ALERTMANAGER_IMAGE; do
             printf '%s=registry.invalid/%s@sha256:%s\n' "$key" "${key,,}" "$digest" >> "$tmp"
           done
           docker compose --env-file "$tmp" -f deploy/docker-compose.yml -f deploy/docker-compose.prod.example.yml --profile app --profile vector --profile observability config --format json |
             python3 deploy/release/config_gate.py --mode production --env-file "$tmp" --compose-config -
 
-      - name: Validate Prometheus alert rule syntax
+      - name: Validate production Prometheus and Alertmanager configuration syntax
         run: |
-          docker run --rm --entrypoint /bin/promtool -v "$PWD/deploy/observability/rules:/rules:ro" prom/prometheus:v2.55.1 check rules /rules/cloudchunk-alerts.yml
+          docker run --rm --entrypoint /bin/promtool \
+            -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
+            prom/prometheus:v2.55.1 check rules /etc/cloudchunk-observability/rules/cloudchunk-alerts.yml
+          ci_token="$(mktemp)"
+          trap 'rm -f "$ci_token"' EXIT
+          printf 'ci-test-scrape-token-nonsecret' > "$ci_token"
+          chmod 600 "$ci_token"
+          docker run --rm --entrypoint /bin/promtool \
+            -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
+            -v "$PWD/deploy/observability/rules:/etc/prometheus/rules:ro" \
+            -v "$ci_token:/etc/prometheus/metrics-token:ro" \
+            prom/prometheus:v2.55.1 check config /etc/cloudchunk-observability/prometheus.prod.yml
+          docker run --rm --entrypoint /bin/amtool \
+            -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
+            prom/alertmanager:v0.27.0 check-config /etc/cloudchunk-observability/alertmanager.dev.yml /etc/cloudchunk-observability/alertmanager.prod.template.yml
 
   build-verification:
     name: backend and frontend build
@@ -101,7 +123,7 @@ jobs:
   docker-restore-drill:
     name: isolated Docker restore smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,7 +131,13 @@ jobs:
       - name: Verify disposable Docker is available
         run: docker info
       - name: Restore synthetic SQL and cold volumes in isolated disposable Docker
-        run: python3 -m unittest discover -s deploy/release/docker_tests -v
+        run: python3 -m unittest discover -s deploy/release/docker_tests -p test_restore_docker.py -v
+      - name: Pull only the isolated synthetic drill images
+        run: docker compose -f deploy/resilience/compose.yml -p ccdrill-image-verify pull
+      - name: Exercise isolated Redis, MinIO and RocketMQ outage/recovery
+        run: python3 -m unittest discover -s deploy/release/docker_tests -p test_dependency_chaos_docker.py -v
+      - name: Confirm synthetic Alertmanager webhook delivery on private Docker network
+        run: python3 -m unittest discover -s deploy/release/docker_tests -p test_alert_delivery_docker.py -v
 
   # This job is opt-in and cannot deploy, migrate, back up or alter production.
   # Configure GitHub environment "production" with required reviewers and restrict refs.

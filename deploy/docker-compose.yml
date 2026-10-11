@@ -12,6 +12,7 @@ volumes:
   rmq-store:
   prometheus-data:
   grafana-data:
+  alertmanager-data:
 
 services:
   mysql:
@@ -101,7 +102,7 @@ services:
     networks: [cloudchunk-net]
 
   minio:
-    image: minio/minio:latest
+    image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     container_name: cc-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -261,6 +262,23 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "9090:9090"
+    networks: [cloudchunk-net]
+
+  # Local default is deliberately a no-op receiver. Real notifications require
+  # an operator-supplied private production config and delivery confirmation.
+  alertmanager:
+    profiles: ["observability"]
+    image: prom/alertmanager:v0.27.0
+    container_name: cc-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./observability/alertmanager.dev.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
     networks: [cloudchunk-net]
 
   grafana:

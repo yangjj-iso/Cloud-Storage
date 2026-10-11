@@ -165,6 +165,7 @@ npm run dev
 - [M3.4 上线预检与验收](./docs/25-release-preflight-and-acceptance.md)：只读历史重名/Flyway/健康检查、真实迁移阻断回归和隔离账号端到端验收。\n- [M3.5 正式发布准备](./docs/26-release-readiness.md)：生产配置门禁、不可变镜像、协调备份/隔离恢复演练及回滚 SOP。
 - [M3.6 生产稳定性 P0](./docs/27-production-stability.md)：私有令牌监控、告警规则、发布后自动验收与受控镜像回滚。
 - [M3.6 P1 依赖健康与故障回归](./docs/28-dependency-resilience.md)：只读管理员依赖状态、模拟故障与安全降级验收。
+- [M3.7 生产韧性验收](./docs/29-resilience-acceptance.md)：隔离 Docker 故障演练、Alertmanager 告警路由与审计证据。
 
 ## 验证
 
