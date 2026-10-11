@@ -4,6 +4,10 @@ x-app-env: &app-env
   MYSQL_HOST: mysql
   MYSQL_PORT: 3306
   MYSQL_PASSWORD: m47-disposable-only
+  # The ephemeral MySQL server generates a self-signed certificate. Require TLS
+  # instead of enabling RSA public-key retrieval or weakening the auth plugin.
+  # This is isolated-only; real environments must verify their approved CA/identity.
+  SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/cloudchunk?sslMode=REQUIRED&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
   REDIS_HOST: redis
   REDIS_PORT: 6379
   RMQ_NAMESRV: namesrv:9876
