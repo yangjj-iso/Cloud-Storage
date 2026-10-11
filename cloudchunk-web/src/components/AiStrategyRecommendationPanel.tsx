@@ -51,15 +51,6 @@ export function AiStrategyRecommendationPanel({ results }: { results: SearchResu
 
   const currentSource=sources.find(x=>x.userFileId===selectedSource);
   const selected=templates.filter(t=>selectedTemplateIds.includes(t.id));
-  const matches=(template:OrganizeTemplate) => {
-    if(!currentSource)return false;
-    // UI hint only; the backend is authoritative for real MIME and active ACL.
-    return template.mimeCategory==='ANY' ||
-      (template.mimeCategory==='TEXT' && currentSource.status !== 'UNSUPPORTED') ||
-      template.mimeCategory==='PDF' || template.mimeCategory==='IMAGE' ||
-      template.mimeCategory==='VIDEO';
-  };
-
   const toggleTemplate=(id:string) => {
     active.current?.abort();
     setSelectedTemplateIds(previous=>previous.includes(id)
