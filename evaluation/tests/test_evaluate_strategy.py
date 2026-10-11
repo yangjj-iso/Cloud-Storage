@@ -33,6 +33,17 @@ class RecommendationOfflineEvaluationTest(unittest.TestCase):
         too_long=[{**cases[0],"model_output":" "+"2 [S1]"+" "*25}]+cases[1:]
         self.assertEqual(2,module.score(too_long)["invalid_outputs"])
 
+    def test_versioned_manifest_rejects_modified_fixture(self):
+        baseline=module.evaluate_version(BASE/"manifest.v1.json",
+                                         BASE/"synthetic_cases.jsonl")
+        self.assertEqual("v1",baseline["benchmark_version"])
+        self.assertEqual("SYNTHETIC_ONLY",baseline["status"])
+        with tempfile.TemporaryDirectory() as folder:
+            modified=Path(folder)/"synthetic_cases.jsonl"
+            modified.write_bytes((BASE/"synthetic_cases.jsonl").read_bytes()+b"\\n")
+            with self.assertRaises(module.EvaluationError):
+                module.evaluate_version(BASE/"manifest.v1.json",modified)
+
     def test_low_sample_does_not_report_accuracy(self):
         records=module.load(BASE/"synthetic_cases.jsonl")[:4]
         self.assertIsNone(module.score(records)["top1_accuracy"])
