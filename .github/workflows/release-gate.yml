@@ -1,4 +1,4 @@
-name: M4.1 reviewed Agent workflow release gates
+name: M4.2 organizing strategies release gates
 on:
   pull_request:
     branches: [main]
