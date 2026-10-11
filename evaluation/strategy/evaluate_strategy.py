@@ -7,7 +7,7 @@ import re
 import sys
 
 ID = re.compile(r"^[a-z0-9_-]{3,40}$")
-CHOICE = re.compile(r"^([1-9][0-9]?)\\s*\\[S1\\]$")
+CHOICE = re.compile(r"^([1-9][0-9]?)\s*\[S1\]$")
 FIELDS = {"id", "eligible", "candidate_count", "expected", "model_output", "scenario"}
 
 class EvaluationError(Exception):
@@ -62,7 +62,7 @@ def score(cases):
         eligible+=1
         b["eligible"]+=1
         raw=case["model_output"]
-        m=CHOICE.fullmatch(raw) if isinstance(raw,str) and "\\n" not in raw and "\\r" not in raw else None
+        m=CHOICE.fullmatch(raw) if isinstance(raw,str) and "\n" not in raw and "\r" not in raw else None
         if not m or int(m.group(1))>case["candidate_count"]:
             invalid+=1
             continue
