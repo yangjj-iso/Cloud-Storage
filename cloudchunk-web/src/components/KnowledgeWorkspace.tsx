@@ -10,6 +10,7 @@ import { AiAgentHistory } from './AiAgentHistory';
 import { BatchMovePanel } from './BatchMovePanel';
 import { RenameAgentPanel } from './RenameAgentPanel';
 import { MoveAgentPanel } from './MoveAgentPanel';
+import { ResearchBriefPanel } from './ResearchBriefPanel';
 
 type Selection = { userFileId: string; fileName: string; generation: number; chunkIndex?: number };
 
@@ -193,6 +194,7 @@ export function KnowledgeWorkspace({ initialQuery = '', focusTick = 0 }: { initi
               </button>)}
               {results.hasMore && <p className="kw-footnote">当前显示前 20 个匹配片段，还有更多结果。请使用更具体的关键词；此结果不代表全量统计。</p>}
             </div>}
+            {results && results.evidence.length > 0 && <ResearchBriefPanel key={'brief-'+searched} results={results} query={searched} onSourceOpen={setSelection} />}
             {results && results.evidence.length > 0 && <BatchMovePanel key={'batch-'+searched} results={results} />}
             {results && results.evidence.length > 0 && <AssistantPanel key={searched} results={results} onSourceOpen={setSelection} />}
           </> : <>
