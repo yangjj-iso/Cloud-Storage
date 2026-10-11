@@ -508,6 +508,14 @@ export const api = {
   },
 
   // ===== Admin =====
+  adminDependencyHealth: async (): Promise<AdminHealthSnapshot> => {
+    const res = await fetch(`${API_BASE}/admin/health-summary`, {
+      headers: authHeaders(),
+      cache: 'no-store',
+    });
+    return parse<AdminHealthSnapshot>(res);
+  },
+
   adminListUsers: async (page = 1, size = 20, keyword = ''): Promise<PageResult<AdminUserItem>> => {
     const q = new URLSearchParams({ page: String(page), size: String(size) });
     if (keyword) q.set('keyword', keyword);
@@ -592,4 +600,18 @@ export const api = {
 
 export function downloadUrl(fileId: string): string {
   return `${API_BASE}/file/${fileId}/download`;
+}
+
+export interface AdminHealthComponent {
+  id: 'mysql' | 'redis' | 'rocketmq' | 'minio' | 'ai-chat' | 'ai-embedding' | 'qdrant';
+  status: 'UP' | 'DOWN' | 'REACHABLE_ONLY' | 'UNREACHABLE' | 'NOT_PROBED' | 'DISABLED';
+  check: 'JDBC' | 'PING' | 'TCP' | 'CONFIGURATION';
+  note: string;
+}
+
+export interface AdminHealthSnapshot {
+  status: 'PARTIALLY_VERIFIED' | 'DEGRADED';
+  sampledAt: string;
+  components: AdminHealthComponent[];
+  oldOutboxEvents: number | null;
 }

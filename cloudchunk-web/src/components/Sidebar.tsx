@@ -16,6 +16,7 @@ const adminItems: Array<{ id: AdminTab; label: string; icon: string }> = [
   { id: 'users', label: '用户管理', icon: 'group' },
   { id: 'files', label: '文件管理', icon: 'folder_managed' },
   { id: 'settings', label: '系统设置', icon: 'settings_applications' },
+  { id: 'health', label: '依赖状态', icon: 'monitor_heart' },
 ];
 
 export function Sidebar() {

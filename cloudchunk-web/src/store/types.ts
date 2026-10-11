@@ -7,7 +7,7 @@ import type {
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast { id: string; kind: ToastKind; title: string; description?: string; ttl?: number }
 export type View = 'upload' | 'files' | 'drive' | 'recycle' | 'shares' | 'admin';
-export type AdminTab = 'users' | 'files' | 'settings';
+export type AdminTab = 'users' | 'files' | 'settings' | 'health';
 
 export interface AuthSlice {
   authChecked: boolean; authLoading: boolean; authUser: AuthUser | null;
