@@ -40,10 +40,16 @@ WHERE table_schema=DATABASE()
                     'ai_organize_run_step','ai_organize_run_event')
 """
 V15_UNIQUE_RUN_FILE = """
-SELECT COUNT(*) FROM information_schema.statistics
-WHERE table_schema=DATABASE()
- AND table_name='ai_organize_run_step'
- AND index_name='uk_organize_run_file' AND non_unique=0
+SELECT COUNT(*) FROM (
+ SELECT index_name FROM information_schema.statistics
+ WHERE table_schema=DATABASE()
+  AND table_name='ai_organize_run_step'
+  AND index_name='uk_organize_run_file' AND non_unique=0
+ GROUP BY index_name
+ HAVING COUNT(*)=2
+  AND SUM(column_name='run_id' AND seq_in_index=1)=1
+  AND SUM(column_name='user_file_id' AND seq_in_index=2)=1
+) valid_indexes
 """
 
 V14_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
