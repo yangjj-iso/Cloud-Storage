@@ -5,14 +5,16 @@ import { KnowledgeWorkspace } from './KnowledgeWorkspace';
 import { AiBatchIndexPanel } from './AiBatchIndexPanel';
 import { AiAgentHistory } from './AiAgentHistory';
 import { AgentWorkflowPanel } from './AgentWorkflowPanel';
+import { OrganizationStrategyPanel } from './OrganizationStrategyPanel';
 import './ai-hub.css';
 
-type Tab = 'overview' | 'explore' | 'prepare' | 'organize';
+type Tab = 'overview' | 'explore' | 'prepare' | 'strategies' | 'organize';
 
 const tabs: Array<{ id: Tab; label: string; icon: string }> = [
   { id: 'overview', label: '工作台首页', icon: 'space_dashboard' },
   { id: 'explore', label: '搜索与问答', icon: 'manage_search' },
   { id: 'prepare', label: '资料准备', icon: 'library_add' },
+  { id: 'strategies', label: '整理策略', icon: 'rule' },
   { id: 'organize', label: '整理记录', icon: 'rule_folder' },
 ];
 
@@ -88,6 +90,7 @@ export function AiHub({ focusTick }: { focusTick: number }) {
         </div>
       )}
       {tab === 'prepare' && <AiBatchIndexPanel onExplore={() => explore()} />}
+      {tab === 'strategies' && <OrganizationStrategyPanel />}
       {tab === 'organize' && (
         <div className="ai-hub-organize">
           <div className="ai-hub-section-head">
