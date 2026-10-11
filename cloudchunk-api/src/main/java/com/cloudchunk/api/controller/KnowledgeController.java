@@ -53,11 +53,19 @@ public class KnowledgeController {
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
     public record SearchRequest(String query) {}
+    public record BatchIndexRequest(java.util.List<Long> userFileIds) {}
 
     @GetMapping("/documents")
     public ResponseEntity<R<Library>> library(@RequestParam(defaultValue="1") int page) {
         return noStore(service.library(UserContext.requireUserId(), page));
     }
+    @PostMapping("/documents/index/batch")
+    public ResponseEntity<R<BatchIndexResult>> indexBatch(@RequestBody BatchIndexRequest request) {
+        if (request == null) throw com.cloudchunk.common.exception.BizException.of(
+                com.cloudchunk.common.exception.ErrorCode.INVALID_PARAMETER);
+        return noStore(service.requestIndexBatch(UserContext.requireUserId(), request.userFileIds()));
+    }
+
     @PostMapping("/search")
     public ResponseEntity<R<SearchResult>> search(@RequestBody SearchRequest request) {
         long userId=UserContext.requireUserId();

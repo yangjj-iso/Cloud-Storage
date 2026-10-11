@@ -50,6 +50,25 @@ class KnowledgeIsolationIT {
     private void publish(KnowledgeIndexStore.Claim c,String text) {
         tx.executeWithoutResult(s -> index.publish(c,text,"READY",null));
     }
+    @Test void bulkIndexIsAllOrNothingForUnownedEntriesAndBounded() {
+        // Both entries reference one physical object, but only entry 101 belongs to user 1.
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of(101L, 102L)));
+        assertEquals(0, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM knowledge_document", Integer.class));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of(101L, 101L)));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of()));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of(101L, -1L)));
+        var result = service.requestIndexBatch(1, java.util.List.of(101L));
+        assertEquals(1, result.accepted());
+        assertEquals(8, result.maxBatchSize());
+        assertEquals(1, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM knowledge_document", Integer.class));
+    }
+
     @Test void liveOwnershipGatesSearchAndEvidenceEvenWhenPhysicalContentIsShared() {
         var c=claim(); publish(c,"needle: shared content");
         assertEquals(1,service.search(1,"needle").evidence().size());

@@ -97,6 +97,24 @@ public class KnowledgeService {
         events.enqueue(FileAvailable.TOPIC, fileId, FileAvailable.of(fileId));
     }
 
+    /**
+     * All-or-nothing authorization BEFORE queueing any extraction event. This
+     * operation only submits existing, AVAILABLE files owned by the current user.
+     * Semantic embedding requires a distinct, per-file consented action.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public BatchIndexResult requestIndexBatch(long userId, List<Long> userFileIds) {
+        if (userFileIds == null || userFileIds.isEmpty() || userFileIds.size() > 8
+                || userFileIds.stream().anyMatch(id -> id == null || id <= 0)
+                || userFileIds.stream().distinct().count() != userFileIds.size()) {
+            throw BizException.of(ErrorCode.INVALID_PARAMETER, "select 1-8 unique document entries");
+        }
+        // Reject the entire request before any database write or outbox enqueue.
+        for (Long id : userFileIds) authorize(userId, id);
+        for (Long id : userFileIds) requestIndex(userId, id);
+        return new BatchIndexResult(userFileIds.size(), 8);
+    }
+
     @Transactional
     public void recoverPending() {
         jdbc.update("""
