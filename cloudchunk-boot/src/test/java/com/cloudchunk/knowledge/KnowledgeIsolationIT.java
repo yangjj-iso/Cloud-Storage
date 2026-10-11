@@ -50,6 +50,28 @@ class KnowledgeIsolationIT {
     private void publish(KnowledgeIndexStore.Claim c,String text) {
         tx.executeWithoutResult(s -> index.publish(c,text,"READY",null));
     }
+    @Test void researchBriefRechecksActualOwnerAndGenerationAtExportTime() {
+        var c = claim();
+        publish(c, "citation text for export only");
+        var brief = new com.cloudchunk.core.knowledge.ResearchBriefService(service);
+        var ref = new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101", c.generation(), 0);
+        var data = brief.prepare(1, java.util.List.of(ref));
+        assertEquals("EXACT_AUTHORIZED_EXCERPTS", data.mode());
+        assertEquals("citation text for export only", data.evidence().getFirst().content());
+        assertEquals(com.cloudchunk.common.exception.ErrorCode.AI_SOURCE_CHANGED,
+            assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> brief.prepare(2, java.util.List.of(ref))).getErrorCode());
+        jdbc.update("UPDATE user_file SET status=1 WHERE id=101");
+        assertEquals(com.cloudchunk.common.exception.ErrorCode.AI_SOURCE_CHANGED,
+            assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> brief.prepare(1, java.util.List.of(ref))).getErrorCode());
+        jdbc.update("UPDATE user_file SET status=0 WHERE id=101");
+        assertEquals(com.cloudchunk.common.exception.ErrorCode.AI_SOURCE_CHANGED,
+            assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> brief.prepare(1, java.util.List.of(
+                    new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101", c.generation()+1, 0)))).getErrorCode());
+    }
+
     @Test void bulkIndexIsAllOrNothingForUnownedEntriesAndBounded() {
         // Both entries reference one physical object, but only entry 101 belongs to user 1.
         assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
