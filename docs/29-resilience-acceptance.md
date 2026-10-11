@@ -4,7 +4,7 @@
 
 ## 1. 不改变生产数据的真实故障演练
 
-真实 Docker 场景基于 `deploy/resilience/compose.yml`，只包含独立 Redis、MinIO、RocketMQ NameServer 三个服务，镜像没有任何生产密钥；不挂载业务数据、不发布主机端口、不连接已有网络或卷。项目名由随机值产生并强制匹配 `ccdrill-<12 位十六进制>`，只对刚创建的项目停止、重启、清理服务。
+真实 Docker 场景基于 `deploy/resilience/compose.yml`，只包含独立 Redis、MinIO、RocketMQ NameServer 三个服务，镜像没有任何生产密钥；隔离演练和开发环境使用固定标签的 S3 兼容镜像 `docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z`，仅作为开发/演练依赖。原 Docker Hub `minio/minio` 已无法拉取；这**不是生产对象存储迁移批准**。生产仍须审查镜像、验证原对象数据兼容性、锁定 digest，并经独立备份恢复演练；不挂载业务数据、不发布主机端口、不连接已有网络或卷。项目名由随机值产生并强制匹配 `ccdrill-<12 位十六进制>`，只对刚创建的项目停止、重启、清理服务。
 
 `deploy/resilience/chaos_drill.py` 的执行顺序如下：
 
