@@ -48,11 +48,11 @@ receivers:
 """
 
 
-def poll(condition, timeout=65):
+def poll(condition, timeout=65, reason='ALERT_DELIVERY_TIMEOUT'):
     end = time.monotonic() + timeout
     while not condition():
         if time.monotonic() >= end:
-            raise DeliveryError("ALERT_DELIVERY_TIMEOUT")
+            raise DeliveryError(reason)
         time.sleep(1)
 
 
@@ -89,7 +89,7 @@ def execute(journal, ticket, ack, runner=chaos_drill.command):
                     "-v", str(directory) + ":/out",
                     SINK_IMAGE, "python", "/app/webhook_sink.py"], timeout=100)
             runner(["docker", "run", "-d", "--rm", "--name", alertmanager,
-                    "--network", network,
+                    "--network", network, "--user", f"{os.getuid()}:{os.getgid()}",
                     "-v", str(config) + ":/etc/alertmanager/alertmanager.yml:ro",
                     AM_IMAGE, "--config.file=/etc/alertmanager/alertmanager.yml",
                     "--storage.path=/tmp/alertmanager"], timeout=100)
@@ -103,7 +103,7 @@ def execute(journal, ticket, ack, runner=chaos_drill.command):
                 except chaos_drill.DrillError:
                     return False
 
-            poll(ready, 60)
+            poll(ready, 60, reason='ALERTMANAGER_NOT_READY')
             payload = json.dumps([{
                 "labels": {"alertname": "CloudChunkSyntheticDelivery",
                            "severity": "info", "drill_id": run_id},
@@ -127,7 +127,7 @@ def execute(journal, ticket, ack, runner=chaos_drill.command):
                 except (OSError, ValueError):
                     return False
 
-            poll(delivered)
+            poll(delivered, reason='WEBHOOK_DELIVERY_TIMEOUT')
             audit.append(journal, {"event": "ALERT_DELIVERY_CONFIRMED",
                                    "run_id": run_id})
             status = "PASS"
@@ -145,7 +145,8 @@ def execute(journal, ticket, ack, runner=chaos_drill.command):
                                    else "ALERT_DRILL_FAILED", "run_id": run_id,
                                    **({"reason_code": failure} if failure else {})})
     return {"status": status, "delivery": "CONFIRMED" if status == "PASS" else "BLOCKED",
-            "scope": "ISOLATED_SYNTHETIC", "audit": audit.verify(journal)}
+            "scope": "ISOLATED_SYNTHETIC",
+            **({"reason_code": failure} if failure else {}), "audit": audit.verify(journal)}
 
 
 def main(argv=None):
