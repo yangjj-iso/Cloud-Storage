@@ -31,16 +31,27 @@ class ReleasePreflightTest(unittest.TestCase):
     def test_post_migration_requires_version_index_and_generated_column(self):
         good = {"duplicate names": 0, "Flyway failures": 0, "Flyway V13": 1,
                 "unique index": 1, "active name column": 1,
-                "Flyway V14": 1, "workflow tables": 3, "unique workflow proposal": 1}
+                "Flyway V14": 1, "workflow tables": 3, "unique workflow proposal": 1,
+                "Flyway V15": 1, "organizing strategy tables": 4, "unique organize run file": 1}
         self.assertEqual("VERIFIED",
             preflight.evaluate("ready", self.count(good))["database_namespace_constraint"])
         self.assertEqual("VERIFIED",
             preflight.evaluate("ready", self.count(good))["ai_workflow_schema"])
+        self.assertEqual("VERIFIED",
+            preflight.evaluate("ready", self.count(good))["organizing_strategy_schema"])
         for key in ("Flyway V13", "unique index", "active name column",
-                    "Flyway V14", "workflow tables", "unique workflow proposal"):
+                    "Flyway V14", "workflow tables", "unique workflow proposal",
+                    "Flyway V15", "organizing strategy tables", "unique organize run file"):
             broken = dict(good, **{key: 0})
             with self.assertRaises(preflight.PreflightError):
                 preflight.evaluate("ready", self.count(broken))
+
+    def test_v15_unique_key_must_have_two_columns_in_correct_order(self):
+        self.assertIn("HAVING COUNT(*)=2", preflight.V15_UNIQUE_RUN_FILE)
+        self.assertIn("column_name='run_id' AND seq_in_index=1",
+                      preflight.V15_UNIQUE_RUN_FILE)
+        self.assertIn("column_name='user_file_id' AND seq_in_index=2",
+                      preflight.V15_UNIQUE_RUN_FILE)
 
     def test_failed_flyway_history_is_a_hard_block(self):
         with self.assertRaisesRegex(preflight.PreflightError, "failed Flyway"):

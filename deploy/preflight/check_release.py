@@ -31,6 +31,27 @@ SELECT COUNT(*) FROM (
 FAILED_MIGRATIONS = "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0"
 V13_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='13' AND success=1")
+V15_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
+                 "WHERE version='15' AND success=1")
+V15_STRATEGY_TABLES = """
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_schema=DATABASE()
+ AND table_name IN ('ai_organize_template','ai_organize_run',
+                    'ai_organize_run_step','ai_organize_run_event')
+"""
+V15_UNIQUE_RUN_FILE = """
+SELECT COUNT(*) FROM (
+ SELECT index_name FROM information_schema.statistics
+ WHERE table_schema=DATABASE()
+  AND table_name='ai_organize_run_step'
+  AND index_name='uk_organize_run_file' AND non_unique=0
+ GROUP BY index_name
+ HAVING COUNT(*)=2
+  AND SUM(column_name='run_id' AND seq_in_index=1)=1
+  AND SUM(column_name='user_file_id' AND seq_in_index=2)=1
+) valid_indexes
+"""
+
 V14_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='14' AND success=1")
 V14_WORKFLOW_TABLES = """
@@ -152,6 +173,13 @@ def evaluate(phase, query_count, health_base=None, health_check=check_health):
             raise PreflightError("V14 AI workflow audit/step tables absent")
         if query_count(V14_UNIQUE_MOVE, "unique workflow proposal") != 1:
             raise PreflightError("V14 proposal uniqueness constraint missing")
+        if query_count(V15_INSTALLED, "Flyway V15") != 1:
+            raise PreflightError("V15 organizing templates migration has not been applied")
+        if query_count(V15_STRATEGY_TABLES, "organizing strategy tables") != 4:
+            raise PreflightError("V15 organizing strategy tables missing")
+        if query_count(V15_UNIQUE_RUN_FILE, "unique organize run file") != 1:
+            raise PreflightError("V15 strategy run uniqueness index missing")
+        counts["organizing_strategy_schema"] = "VERIFIED"
         counts["ai_workflow_schema"] = "VERIFIED"
         if health_base:
             health_check(health_base)
