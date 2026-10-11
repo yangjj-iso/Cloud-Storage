@@ -33,7 +33,8 @@ class ReleasePreflightTest(unittest.TestCase):
                 "unique index": 1, "active name column": 1,
                 "Flyway V14": 1, "workflow tables": 3, "unique workflow proposal": 1,
                 "Flyway V15": 1, "organizing strategy tables": 4, "unique organize run file": 1,
-                "Flyway V16": 1, "strategy recommendation table": 1, "unique AI strategy proposal": 1}
+                "Flyway V16": 1, "strategy recommendation table": 1, "unique AI strategy proposal": 1,
+                "Flyway V17": 1, "privacy governance tables": 2}
         self.assertEqual("VERIFIED",
             preflight.evaluate("ready", self.count(good))["database_namespace_constraint"])
         self.assertEqual("VERIFIED",
@@ -42,10 +43,13 @@ class ReleasePreflightTest(unittest.TestCase):
             preflight.evaluate("ready", self.count(good))["organizing_strategy_schema"])
         self.assertEqual("VERIFIED",
             preflight.evaluate("ready", self.count(good))["ai_strategy_feedback_schema"])
+        self.assertEqual("VERIFIED",
+            preflight.evaluate("ready", self.count(good))["ai_privacy_governance_schema"])
         for key in ("Flyway V13", "unique index", "active name column",
                     "Flyway V14", "workflow tables", "unique workflow proposal",
                     "Flyway V15", "organizing strategy tables", "unique organize run file",
-                    "Flyway V16", "strategy recommendation table", "unique AI strategy proposal"):
+                    "Flyway V16", "strategy recommendation table", "unique AI strategy proposal",
+                    "Flyway V17", "privacy governance tables"):
             broken = dict(good, **{key: 0})
             with self.assertRaises(preflight.PreflightError):
                 preflight.evaluate("ready", self.count(broken))
