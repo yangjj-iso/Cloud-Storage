@@ -134,16 +134,22 @@ class BrowserContracts(unittest.TestCase):
         self.accept_dialog = True
         self.page.on('dialog', lambda d: d.accept() if self.accept_dialog else d.dismiss())
         self.page.set_default_timeout(8000)
+        self.addCleanup(self.context.close)
         self.page.goto(self.base)
         self.page.get_by_label('邮箱或用户名').fill('synthetic')
         self.page.get_by_label('密码', exact=True).fill('Synthetic-only-pass-46!')
         self.page.locator('form button[type="submit"]').click()
+        self.enter_workbench()
+
+    def enter_workbench(self):
+        # Login and reload land in the upload center. Exercise the visible entry,
+        # rather than injecting client state or assuming a different default page.
+        self.page.get_by_role('button', name=re.compile('前往 AI 智能工作台')).click()
         self.nav = self.page.get_by_role('navigation', name='AI 工作台导航')
         expect(self.nav).to_be_visible()
 
     def tearDown(self):
         self.unknown.extend(self.api.unknown)
-        self.context.close()
         self.assertFalse(self.api.unknown, f'Unhandled contract requests: {self.api.unknown}')
         self.assertFalse(self.errors, f'Browser errors: {self.errors}')
 
@@ -211,6 +217,7 @@ class BrowserContracts(unittest.TestCase):
         expect(panel.get_by_text('计划已取消。已执行的移动不会自动恢复。', exact=True)).to_be_visible()
         self.assertEqual('APPLIED', self.api.steps[0]['state'])
         self.page.reload()
+        self.enter_workbench()
         self.nav.get_by_role('button', name=re.compile('整理记录')).click()
         panel.get_by_role('button', name=re.compile('2 步 · 已取消')).click()
         expect(panel.get_by_role('button', name='尝试条件撤销', exact=True)).to_be_enabled()
