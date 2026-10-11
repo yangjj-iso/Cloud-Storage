@@ -174,6 +174,7 @@ npm run dev
 - [M4.2 智能整理策略与冲突模拟](./docs/34-organizing-templates.md)：保存文件类型规则、只读冲突预览、逐项审批执行与 Flyway V15 安全门禁。
 - [M4.3 AI 策略推荐与反馈闭环](./docs/35-ai-strategy-feedback.md)：一次性授权模型推荐已保存的规则，私有反馈分类、30 日统计和 Flyway V16 门禁。
 - [M4.4 推荐质量与隐私治理](./docs/36-ai-quality-privacy-governance.md)：合成离线质量评测、模型授权元数据记录与受控保留期处理。
+- [M4.5 AI 授权与反馈复核](./docs/37-ai-consent-review-benchmark.md)：版本化评测、后续推荐权限开关、分类反馈人工复核、V18 迁移。
 
 ## 验证
 

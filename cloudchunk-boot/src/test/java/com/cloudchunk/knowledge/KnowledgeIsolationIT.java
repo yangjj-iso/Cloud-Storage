@@ -30,12 +30,14 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 17,"V17 privacy governance migration must execute on fresh MySQL");
+        assertTrue(result.migrationsExecuted >= 18,"V18 strategy consent and feedback review migration must execute on fresh MySQL");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
+        jdbc.update("DELETE FROM ai_strategy_feedback_review");
+        jdbc.update("DELETE FROM ai_strategy_user_policy");
         jdbc.update("DELETE FROM ai_strategy_consent_audit");
         jdbc.update("DELETE FROM ai_strategy_retention_run");
         jdbc.update("DELETE FROM ai_strategy_recommendation");
@@ -105,6 +107,85 @@ class KnowledgeIsolationIT {
         assertEquals(1,gov.history(2).size());
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_strategy_retention_run",Integer.class));
         assertEquals(0,allowed.preview().expiredConsentEvents());
+    }
+
+    @Test void explicitFutureConsentOptOutBlocksProviderButKeepsPerRequestConsent() {
+        var governance=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService(jdbc,false);
+        assertTrue(governance.policy(1).recommendationsAllowed());
+        assertFalse(governance.policy(1).explicitChoice());
+        var no=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.StrategyChoice(false,true);
+        assertFalse(governance.choose(1,no).recommendationsAllowed());
+        assertTrue(governance.policy(1).explicitChoice());
+        assertTrue(governance.policy(2).recommendationsAllowed());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> governance.ensureAllowed(1));
+        var agent=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var ai=new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(jdbc,service,agent);
+        org.springframework.test.util.ReflectionTestUtils.setField(ai,"governance",governance);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            ai.suggest(1,new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",1,0),
+                java.util.List.of("11111111-1111-4111-8111-111111111111"),true)));
+        verifyNoInteractions(agent);
+        assertEquals("RECOMMENDATIONS_BLOCKED",governance.history(1).getFirst().event());
+        assertEquals(0,governance.history(1).getFirst().candidateCount());
+        assertTrue(governance.choose(1,
+            new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.StrategyChoice(true,true))
+            .recommendationsAllowed());
+        assertDoesNotThrow(()->governance.ensureAllowed(1));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            governance.choose(1,new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.StrategyChoice(false,false)));
+    }
+
+    @Test void humanFeedbackReviewRequiresOwnerLiveGenerationAndIndependentAdmin() {
+        var c=claim();
+        publish(c,"Evidence snapshot for review");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Research',1,0)");
+        var policy=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+                jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class))
+                .create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                    "Review notes","TEXT","200"));
+        String moveId="aaaa1111-1111-4111-8111-111111111111";
+        String recId="bbbb2222-2222-4222-8222-222222222222";
+        insertMoveProposal(moveId,1,101,"Alice.txt");
+        jdbc.update("""
+           INSERT INTO ai_strategy_recommendation
+             (id,user_id,template_id,move_proposal_id,user_file_id,source_generation,
+              status,feedback_code)
+           VALUES (?,1,?,?,101,?,'REJECTED','WRONG_FOLDER')
+           """,recId,policy.id(),moveId,c.generation());
+        var reviews=new com.cloudchunk.core.knowledge.AiStrategyFeedbackReviewService(jdbc);
+        var yes=new com.cloudchunk.core.knowledge.AiStrategyFeedbackReviewService.Confirm(true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.request(2,recId,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.request(1,recId,
+                    new com.cloudchunk.core.knowledge.AiStrategyFeedbackReviewService.Confirm(false)));
+        var requested=reviews.request(1,recId,yes);
+        assertEquals("REQUESTED",requested.state());
+        assertEquals("WRONG_FOLDER",requested.feedbackReason());
+        assertEquals(1,reviews.mine(1).size());
+        assertTrue(reviews.mine(2).isEmpty());
+        assertEquals(1,reviews.pending().size());
+        assertThrows(org.springframework.dao.DuplicateKeyException.class,
+                () -> reviews.request(1,recId,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.resolve(1,requested.id(),"CONFIRMED",yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.resolve(2,requested.id(),"ARBITRARY_TEXT",yes));
+        assertEquals("REVIEWED",
+                reviews.resolve(2,requested.id(),"FOLLOWUP_REQUIRED",yes).state());
+        assertEquals("FOLLOWUP_REQUIRED",reviews.mine(1).getFirst().reviewCode());
+        assertTrue(reviews.pending().isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.resolve(2,requested.id(),"CONFIRMED",yes));
+
+        jdbc.update("UPDATE knowledge_document SET generation=generation+1 WHERE file_id=?",FILE);
+        assertTrue(new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(
+                jdbc,service,mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class))
+                .recent(1).isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.request(1,recId,yes));
     }
 
     @Test void aiStrategyRecommendationChecksTemplateOwnershipBeforeAgentAndFeedbackIsPrivate() {

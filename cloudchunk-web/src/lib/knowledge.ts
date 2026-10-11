@@ -131,6 +131,18 @@ export interface StrategyConsentReceipt {
   candidateCount: number;
   recordedAt: string;
 }
+export interface StrategyPolicy {
+  recommendationsAllowed: boolean;
+  explicitChoice: boolean;
+}
+export interface StrategyReview {
+  id: string;
+  state: 'REQUESTED' | 'REVIEWED';
+  feedbackReason: string;
+  createdAt: string;
+  reviewCode: string | null;
+  reviewedAt: string | null;
+}
 export interface StrategyFeedbackQuality {
   accepted: number;
   rejected: number;
@@ -176,6 +188,17 @@ export interface BatchIndexResult { accepted: number; maxBatchSize: number }
 export interface ResearchBrief { evidence: Evidence[]; mode: 'EXACT_AUTHORIZED_EXCERPTS'; complete: boolean }
 
 export const knowledgeApi = {
+  strategyPolicy: (signal: AbortSignal) =>
+    request<StrategyPolicy>('/assistant/strategy/recommendation-policy',signal),
+  setStrategyPolicy: (allowRecommendations: boolean,signal: AbortSignal) =>
+    request<StrategyPolicy>('/assistant/strategy/recommendation-policy',
+      signal,{allowRecommendations,confirmed:true}),
+  feedbackReviews: (signal: AbortSignal) =>
+    request<StrategyReview[]>('/assistant/strategy/feedback-reviews',signal),
+  requestFeedbackReview: (id: string,signal: AbortSignal) =>
+    request<StrategyReview>('/assistant/strategy/recommendations/'+encodeURIComponent(id)+
+      '/review',signal,{confirmed:true}),
+
   strategyRecommend: (source: SourceRef, templateIds: string[], consent: boolean, signal: AbortSignal) =>
     request<StrategyRecommendation>('/assistant/strategy/recommend', signal, {source,templateIds,consent}),
   strategyFeedback: (id: string, decision: Exclude<StrategyDecision,'PENDING'>,

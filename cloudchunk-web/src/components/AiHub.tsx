@@ -6,9 +6,10 @@ import { AiBatchIndexPanel } from './AiBatchIndexPanel';
 import { AiAgentHistory } from './AiAgentHistory';
 import { AgentWorkflowPanel } from './AgentWorkflowPanel';
 import { OrganizationStrategyPanel } from './OrganizationStrategyPanel';
+import { AiPrivacyPanel } from './AiPrivacyPanel';
 import './ai-hub.css';
 
-type Tab = 'overview' | 'explore' | 'prepare' | 'strategies' | 'organize';
+type Tab = 'overview' | 'explore' | 'prepare' | 'strategies' | 'organize' | 'privacy';
 
 const tabs: Array<{ id: Tab; label: string; icon: string }> = [
   { id: 'overview', label: '工作台首页', icon: 'space_dashboard' },
@@ -16,6 +17,7 @@ const tabs: Array<{ id: Tab; label: string; icon: string }> = [
   { id: 'prepare', label: '资料准备', icon: 'library_add' },
   { id: 'strategies', label: '整理策略', icon: 'rule' },
   { id: 'organize', label: '整理记录', icon: 'rule_folder' },
+  { id: 'privacy', label: 'AI 隐私控制', icon: 'shield_lock' },
 ];
 
 const examples = ['上传过程中如何保证文件完整性？', '哪些文档介绍了服务降级和恢复？', '搜索有关权限校验的资料'];
@@ -96,6 +98,7 @@ export function AiHub({ focusTick }: { focusTick: number }) {
         </div>
       )}
       {tab === 'prepare' && <AiBatchIndexPanel onExplore={() => explore()} />}
+      {tab === 'privacy' && <AiPrivacyPanel />}
       {tab === 'strategies' && <OrganizationStrategyPanel />}
       {tab === 'organize' && (
         <div className="ai-hub-organize">
