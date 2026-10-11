@@ -508,6 +508,12 @@ export const api = {
   },
 
   // ===== Admin =====
+  adminOperations: async (): Promise<AdminOperationsOverview> => {
+    const res = await fetch(`${API_BASE}/admin/operations`, {
+      headers: authHeaders(), cache: 'no-store',
+    });
+    return parse<AdminOperationsOverview>(res);
+  },
   adminDependencyHealth: async (): Promise<AdminHealthSnapshot> => {
     const res = await fetch(`${API_BASE}/admin/health-summary`, {
       headers: authHeaders(),
@@ -614,4 +620,29 @@ export interface AdminHealthSnapshot {
   sampledAt: string;
   components: AdminHealthComponent[];
   oldOutboxEvents: number | null;
+}
+
+export interface AdminOperationsSlo {
+  state: 'UNCONFIGURED' | 'UNAVAILABLE' | 'WARMING' | 'LOW_TRAFFIC' | 'BREACH' | 'OBSERVED';
+  objective: number;
+  observedAvailability: number | null;
+  burnRate1h: number | null;
+  requests7d: number;
+  scrapeCoverage: number;
+  window: string;
+  note: string;
+}
+export interface AdminOperationsAlert {
+  fingerprint: string;
+  name: string;
+  severity: 'critical' | 'warning' | 'unknown';
+  state: string;
+  startedAt: string;
+}
+export interface AdminOperationsOverview {
+  status: 'READ_ONLY' | 'PARTIAL';
+  sampledAt: string;
+  slo: AdminOperationsSlo;
+  alerts: AdminOperationsAlert[];
+  alertSource: 'VERIFIED' | 'UNAVAILABLE' | 'UNCONFIGURED';
 }

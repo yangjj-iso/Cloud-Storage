@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type AdminHealthSnapshot, type AdminHealthComponent } from '../lib/api';
 import { MaterialIcon } from './ui/MaterialIcon';
+import { OperationsPanel } from './OperationsPanel';
 
 const labels: Record<AdminHealthComponent['id'], string> = {
   mysql: 'MySQL 数据库',
@@ -83,6 +84,7 @@ export function SystemHealth() {
               </section>
             ))}
           </div>
+          <OperationsPanel />
           <p className="mt-xl rounded-xl bg-surface-container p-md text-body-md text-on-surface-variant">
             AI Provider 未调用外部 API，Qdrant 仅显示配置状态；RocketMQ 与 MinIO 仅测试 TCP 连接，无法代替真实上传或消息消费验收。
             故障注入仅在独立测试环境执行，生产请使用 M3.6 发布门禁和审批流程。

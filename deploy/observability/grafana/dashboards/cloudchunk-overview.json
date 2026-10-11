@@ -271,6 +271,62 @@
       ],
       "title": "MySQL 连接池等待",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "1 - (sum(increase(http_server_requests_seconds_count{job=\"cloudchunk-api\",status=~\"5..\"}[7d])) or vector(0)) / clamp_min((sum(increase(http_server_requests_seconds_count{job=\"cloudchunk-api\"}[7d])) or vector(0)),1)",
+          "legendFormat": "7d observed availability",
+          "refId": "A"
+        }
+      ],
+      "title": "7 日 HTTP 观察可用率（低流量不评估）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "(sum(increase(http_server_requests_seconds_count{job=\"cloudchunk-api\",status=~\"5..\"}[1h])) or vector(0)) / clamp_min((sum(increase(http_server_requests_seconds_count{job=\"cloudchunk-api\"}[1h])) or vector(0)),1) / 0.001",
+          "legendFormat": "burn",
+          "refId": "A"
+        }
+      ],
+      "title": "1 小时错误预算燃烧（99.9% 目标）",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -290,5 +346,5 @@
   "timezone": "browser",
   "title": "CloudChunk 运行总览",
   "uid": "cloudchunk-overview",
-  "version": 2
+  "version": 3
 }
