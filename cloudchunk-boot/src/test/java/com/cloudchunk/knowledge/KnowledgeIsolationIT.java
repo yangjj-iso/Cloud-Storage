@@ -30,12 +30,16 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 14,"V14 workflow schema must execute on fresh MySQL");
+        assertTrue(result.migrationsExecuted >= 15,"V15 organizing template schema must execute on fresh MySQL");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
+        jdbc.update("DELETE FROM ai_organize_run_event");
+        jdbc.update("DELETE FROM ai_organize_run_step");
+        jdbc.update("DELETE FROM ai_organize_run");
+        jdbc.update("DELETE FROM ai_organize_template");
         jdbc.update("DELETE FROM ai_agent_workflow_event");
         jdbc.update("DELETE FROM ai_agent_workflow_step");
         jdbc.update("DELETE FROM ai_agent_workflow");
@@ -53,6 +57,96 @@ class KnowledgeIsolationIT {
     private void publish(KnowledgeIndexStore.Claim c,String text) {
         tx.executeWithoutResult(s -> index.publish(c,text,"READY",null));
     }
+    @Test void organizingTemplateSimulationBlocksCrossAccountAndRequiresSeparateApproval() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Organized',1,0)");
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        var policies=new com.cloudchunk.core.knowledge.OrganizationTemplateService(jdbc,drive);
+        var policy=policies.create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Text to Organized","TEXT","200"));
+        assertEquals("Organized",policy.destinationName());
+        assertEquals(1,policies.templates(1).size());
+        assertTrue(policies.templates(2).isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->policies.simulate(2,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("102"))));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->policies.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101","102"))));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_organize_run",Integer.class));
+        var plan=policies.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101")));
+        assertEquals("READY",plan.steps().getFirst().state());
+        assertEquals("ACTIVE",plan.status());
+        assertEquals(1,plan.matched());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->policies.detail(2,plan.id()));
+        var yes=new com.cloudchunk.core.knowledge.OrganizationTemplateService.Confirm(true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.execute(1,plan.id(),1,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.approve(1,plan.id(),1,
+                        new com.cloudchunk.core.knowledge.OrganizationTemplateService.Confirm(false)));
+        assertEquals("APPROVED",policies.approve(1,plan.id(),1,yes).steps().getFirst().state());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.approve(1,plan.id(),1,yes));
+        doAnswer(inv -> {
+            jdbc.update("UPDATE user_file SET parent_id=200 WHERE id=101 AND user_id=1");
+            return null;
+        }).when(drive).move(101L,1L,200L);
+        var applied=policies.execute(1,plan.id(),1,yes);
+        assertEquals("APPLIED",applied.steps().getFirst().state());
+        assertEquals("COMPLETED",applied.status());
+        assertEquals(200L,jdbc.queryForObject(
+                "SELECT parent_id FROM user_file WHERE id=101",Long.class));
+        verify(drive,times(1)).move(101L,1L,200L);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.execute(1,plan.id(),1,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.cancel(1,plan.id(),yes));
+        assertEquals(3,jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ai_organize_run_event WHERE run_id=?",Integer.class,plan.id()));
+    }
+
+    @Test void organizingDryRunExposesConflictsAndExecutionBlocksStaleSnapshots() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Destination',1,0)");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_id,file_name,is_dir,parent_id) VALUES (202,1,?,'Alice.txt',0,200)",FILE);
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        var policyService=new com.cloudchunk.core.knowledge.OrganizationTemplateService(jdbc,drive);
+        var policy=policyService.create(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                        "Text files","TEXT","200"));
+        var yes=new com.cloudchunk.core.knowledge.OrganizationTemplateService.Confirm(true);
+        var blocked=policyService.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101")));
+        assertEquals("NAME_CONFLICT",blocked.steps().getFirst().state());
+        assertEquals(1,blocked.blocked());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.approve(1,blocked.id(),1,yes));
+        assertEquals("COMPLETED",policyService.skip(1,blocked.id(),1,yes).status());
+        verifyNoInteractions(drive);
+
+        jdbc.update("DELETE FROM user_file WHERE id=202");
+        var fresh=policyService.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101")));
+        policyService.approve(1,fresh.id(),1,yes);
+        jdbc.update("UPDATE user_file SET file_name='Changed.txt',updated_at=DATE_ADD(updated_at,INTERVAL 1 SECOND) WHERE id=101");
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.execute(1,fresh.id(),1,yes));
+        verifyNoInteractions(drive);
+        assertEquals("APPROVED",policyService.detail(1,fresh.id()).steps().getFirst().state());
+        assertEquals("CANCELLED",policyService.cancel(1,fresh.id(),yes).status());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.execute(1,fresh.id(),1,yes));
+        policyService.archive(1,policy.id(),yes);
+        assertTrue(policyService.templates(1).isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.simulate(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101"))));
+        verifyNoInteractions(drive);
+    }
+
     @Test void durableAgentPlanRequiresOwnershipAndSequentialExplicitActions() {
         // All proposals are synthetic; existing AiMoveAgentService tests cover actual
         // file state, row-lock, sibling conflict and 15-minute conditional undo.
