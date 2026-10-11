@@ -169,6 +169,7 @@ npm run dev
 - [M3.7 生产韧性验收](./docs/29-resilience-acceptance.md)：隔离 Docker 故障演练、Alertmanager 告警路由与审计证据。
 - [M3.8 SLO 与故障处置闭环](./docs/30-operations-slo-incident.md)：管理员只读 SLO、活动告警、审计式事件生命周期与复盘清单。
 - [M3.9 业务 SLI 与自动复盘草稿](./docs/31-business-sli-postmortem.md)：上传合并、下载流、异步终态、AI 降级指标及证据式复盘。
+- [M4.0 AI-Native 智能工作台](./docs/32-ai-native-workspace.md)：独立 AI 入口、全局快捷检索、受控批量索引、引用复核及研究摘录导出。
 
 ## 验证
 
