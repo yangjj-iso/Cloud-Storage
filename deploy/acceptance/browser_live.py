@@ -42,6 +42,8 @@ def main() -> int:
             page.get_by_label("邮箱或用户名").fill(fixture["username"])
             page.get_by_label("密码", exact=True).fill(fixture["password"])
             page.locator('form button[type="submit"]').click()
+            # Login lands in the upload center; use the same visible entry as a user.
+            page.get_by_role("button", name=re.compile("前往 AI 智能工作台")).click()
             navigation = page.get_by_role("navigation", name="AI 工作台导航")
             expect(navigation).to_be_visible()
             report["journeys"].append("login")
@@ -98,6 +100,7 @@ def main() -> int:
             assert cancelled_data["status"] == "CANCELLED" and cancelled_data["steps"][0]["state"] == "APPLIED"
             report["journeys"].append("cancel-preserves-move")
             page.reload()
+            page.get_by_role("button", name=re.compile("前往 AI 智能工作台")).click()
             navigation.get_by_role("button", name=re.compile("整理策略")).click()
             strategy.get_by_role("button", name=re.compile(r"Browser acceptance · CANCELLED")).click()
             expect(strategy.locator(".ai-strategy-steps article").first.get_by_text("已移动", exact=True)).to_be_visible()
