@@ -26,6 +26,13 @@ class RecommendationOfflineEvaluationTest(unittest.TestCase):
         records[8]["model_output"]="1 [S1]"
         self.assertEqual("BLOCKED",module.score(records)["status"])
 
+    def test_whitespace_allowed_but_long_output_rejected_like_live_parser(self):
+        cases=module.load(BASE/"synthetic_cases.jsonl")
+        normal=[{**cases[0],"model_output":"  2 [S1]  "}]+cases[1:]
+        self.assertEqual(6,module.score(normal)["correct"])
+        too_long=[{**cases[0],"model_output":" "+"2 [S1]"+" "*25}]+cases[1:]
+        self.assertEqual(2,module.score(too_long)["invalid_outputs"])
+
     def test_low_sample_does_not_report_accuracy(self):
         records=module.load(BASE/"synthetic_cases.jsonl")[:4]
         self.assertIsNone(module.score(records)["top1_accuracy"])
