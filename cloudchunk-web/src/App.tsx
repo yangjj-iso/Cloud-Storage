@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
+import { AiHub } from './components/AiHub';
 import { Topbar } from './components/Topbar';
 import { QuotaWidget } from './components/QuotaWidget';
 import { UploadDropZone } from './components/UploadDropZone';
@@ -35,6 +36,8 @@ function AuthenticatedApp() {
   const initAuth = useAppStore((s) => s.initAuth);
   const view = useAppStore((s) => s.view);
   const refreshQuota = useAppStore((s) => s.refreshQuota);
+  const setView = useAppStore((s) => s.setView);
+  const [aiFocusTick, setAiFocusTick] = useState(0);
   const refreshFiles = useAppStore((s) => s.refreshFiles);
   const refreshShares = useAppStore((s) => s.refreshShares);
 
@@ -55,6 +58,21 @@ function AuthenticatedApp() {
     return () => window.clearInterval(timer);
   }, [authUser, refreshFiles, refreshQuota, refreshShares]);
 
+  // Ctrl/Command+K opens the user's private AI knowledge search, without sending
+  // a query to the model or making an external request.
+  useEffect(() => {
+    if (!authUser) return;
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setView('ai');
+        setAiFocusTick(v => v + 1);
+      }
+    };
+    window.addEventListener('keydown', onShortcut);
+    return () => window.removeEventListener('keydown', onShortcut);
+  }, [authUser, setView]);
+
   if (!authChecked) {
     return <div className="flex h-full items-center justify-center bg-background text-body-md text-on-surface-variant"><MaterialIcon className="mr-sm animate-pulse text-primary">cloud_sync</MaterialIcon>正在连接 CloudChunk…</div>;
   }
@@ -65,13 +83,26 @@ function AuthenticatedApp() {
     <div className="h-screen overflow-hidden bg-background text-on-background">
       <Sidebar />
       <div className="h-screen md:ml-[260px]">
+        <div className="sticky top-0 z-30 flex gap-xs border-b border-outline-variant bg-surface p-sm md:hidden" aria-label="移动端页面导航">
+          {([['ai','AI 工作台','auto_awesome'],['upload','上传','cloud_upload'],['drive','云盘','folder'],['files','文件','description']] as const).map(([target,label,icon]) => (
+            <button key={target} type="button" onClick={() => setView(target)}
+              aria-current={view === target ? 'page' : undefined}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-xs py-sm text-label-sm ${view === target ? 'bg-primary-container font-bold text-on-primary-container' : 'text-on-surface-variant'}`}>
+              <MaterialIcon className="text-[18px]">{icon}</MaterialIcon>{label}
+            </button>
+          ))}
+        </div>
         <Topbar />
         <main className="h-screen overflow-y-auto pt-0 md:h-[calc(100vh-64px)] md:pt-0 md:mt-16">
+          {view === 'ai' && <AiHub focusTick={aiFocusTick} />}
           {view === 'upload' && (
             <div className="p-lg lg:p-xl">
               <div className="mb-lg">
                 <h1 className="text-headline-lg text-on-surface">上传中心</h1>
-                <p className="mt-xs text-body-md text-on-surface-variant">拖放文件并实时管理上传任务。</p>
+                <p className="mt-xs text-body-md text-on-surface-variant">拖放文件并实时管理上传任务。完成完整性校验后，可在 AI 工作台建立可检索资料。</p>
+                <button type="button" className="mt-md inline-flex items-center gap-sm rounded-lg border border-primary-fixed-dim bg-primary-fixed px-md py-sm text-label-md text-primary" onClick={() => setView('ai')}>
+                  <MaterialIcon>auto_awesome</MaterialIcon>前往 AI 智能工作台 <MaterialIcon>arrow_forward</MaterialIcon>
+                </button>
               </div>
               <div className="grid grid-cols-1 items-start gap-lg lg:grid-cols-12">
                 <div className="space-y-lg lg:col-span-8">

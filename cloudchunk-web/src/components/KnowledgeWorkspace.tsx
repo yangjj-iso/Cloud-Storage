@@ -28,7 +28,7 @@ function HighlightMatch({ text, query }: { text: string; query: string }) {
 const readable = (d: KnowledgeDocument) => d.status === 'READY' || d.status === 'PARTIAL';
 const errorMessage = (e: unknown) => e instanceof Error ? e.message : '请求失败，请重试';
 
-export function KnowledgeWorkspace() {
+export function KnowledgeWorkspace({ initialQuery = '', focusTick = 0 }: { initialQuery?: string; focusTick?: number }) {
   const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
   const [library, setLibrary] = useState<Library | null>(null);
@@ -77,6 +77,10 @@ export function KnowledgeWorkspace() {
     return () => controller.abort();
   }, []);
   useEffect(() => () => { searchRequest.current?.abort(); indexRequest.current?.abort(); }, []);
+  useEffect(() => {
+    if (initialQuery) setQuery(initialQuery.slice(0, 100));
+    searchInput.current?.focus();
+  }, [initialQuery, focusTick]);
 
   const search = async (event: FormEvent) => {
     event.preventDefault();

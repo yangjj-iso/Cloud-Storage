@@ -100,7 +100,11 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown, ove
   }
   return result.data;
 }
+export interface BatchIndexResult { accepted: number; maxBatchSize: number }
+
 export const knowledgeApi = {
+  indexBatch: (userFileIds: number[], signal: AbortSignal) =>
+    request<BatchIndexResult>('/documents/index/batch', signal, { userFileIds }),
   library: (page: number, signal: AbortSignal) => request<Library>(`/documents?page=${page}`, signal),
   search: (query: string, signal: AbortSignal) => request<SearchResult>('/search', signal, { query }),
   semanticCapabilities: (signal: AbortSignal) =>
