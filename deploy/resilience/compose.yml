@@ -1,0 +1,19 @@
+# Disposable GitHub-hosted/isolated drill only: no published ports, no named
+# volumes, no shared or external networks, no access to production credentials.
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs: ["/data"]
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: "ci-disposable-admin"
+      MINIO_ROOT_PASSWORD: "ci-disposable-secret-change-after-drill"
+    tmpfs: ["/data"]
+  rmq-namesrv:
+    image: apache/rocketmq:5.2.0
+    command: ["sh", "mqnamesrv"]
+    environment:
+      JAVA_OPT_EXT: "-Xms256m -Xmx256m -Xmn128m"
