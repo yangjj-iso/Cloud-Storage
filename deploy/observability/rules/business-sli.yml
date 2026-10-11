@@ -1,0 +1,44 @@
+groups:
+  - name: cloudchunk-business-sli
+    interval: 30s
+    rules:
+      - record: cloudchunk:business:upload_merge_error_ratio10m
+        expr: |
+          (sum(increase(cloudchunk_business_operation_total{operation="upload_merge",result="server_error"}[10m])) or vector(0))
+          / clamp_min((sum(increase(cloudchunk_business_operation_total{operation="upload_merge",result=~"accepted|server_error"}[10m])) or vector(0)), 1)
+      - record: cloudchunk:business:download_stream_failure_ratio10m
+        expr: |
+          (sum(increase(cloudchunk_business_operation_total{operation="download_stream",result="failed"}[10m])) or vector(0))
+          / clamp_min((sum(increase(cloudchunk_business_operation_total{operation="download_stream",result=~"completed|failed"}[10m])) or vector(0)), 1)
+      - record: cloudchunk:business:ai_fallback_ratio10m
+        expr: |
+          (sum(increase(cloudchunk_business_ai_retrieval_total{kind="fallback"}[10m])) or vector(0))
+          / clamp_min((sum(increase(cloudchunk_business_ai_retrieval_total[10m])) or vector(0)), 1)
+      - alert: CloudChunkUploadMergeServerFailures
+        expr: |
+          cloudchunk:business:upload_merge_error_ratio10m > 0.05
+          and (sum(increase(cloudchunk_business_operation_total{operation="upload_merge",result=~"accepted|server_error"}[10m])) or vector(0)) >= 20
+        for: 5m
+        labels: {severity: warning, service: upload}
+        annotations: {summary: "Upload merge server errors >5% (minimum 20 attempts)"}
+      - alert: CloudChunkDownloadStreamFailures
+        expr: |
+          cloudchunk:business:download_stream_failure_ratio10m > 0.05
+          and (sum(increase(cloudchunk_business_operation_total{operation="download_stream",result=~"completed|failed"}[10m])) or vector(0)) >= 20
+        for: 5m
+        labels: {severity: critical, service: download}
+        annotations: {summary: "Streaming download failures >5% (minimum 20 streams)"}
+      - alert: CloudChunkOutboxOverdue
+        expr: |
+          cloudchunk_business_async_outbox_stale > 0
+          and cloudchunk_business_async_sample_valid == 1
+        for: 10m
+        labels: {severity: warning, service: async}
+        annotations: {summary: "Unfinished Outbox events older than 10 minutes"}
+      - alert: CloudChunkAiFallbackHigh
+        expr: |
+          cloudchunk:business:ai_fallback_ratio10m > 0.30
+          and (sum(increase(cloudchunk_business_ai_retrieval_total[10m])) or vector(0)) >= 20
+        for: 10m
+        labels: {severity: warning, service: ai}
+        annotations: {summary: "High proportion of fallback retrieval responses"}
