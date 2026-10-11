@@ -50,6 +50,7 @@ class RollbackTest(unittest.TestCase):
             services = {name: {"image":"registry.example.net/"+name+"@sha256:"+"a"*64}
                         for name in rollback.config_gate.REQUIRED_SERVICES}
             services["api"]["image"] = backend
+            services["api"]["environment"] = {"OPS_PROMETHEUS_URL": "http://prometheus:9090", "OPS_ALERTMANAGER_URL": "http://alertmanager:9093"}
             services["worker"]["image"] = backend
             services["web"]["image"] = web
             services["web"]["ports"] = [{"host_ip":"127.0.0.1", "target":80, "published":8088}]
