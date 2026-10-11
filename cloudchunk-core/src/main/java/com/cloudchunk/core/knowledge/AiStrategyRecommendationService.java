@@ -73,6 +73,7 @@ public class AiStrategyRecommendationService {
      */
     public Recommendation suggest(long userId,SuggestRequest request) {
         validate(request);
+        if (governance!=null) governance.ensureAllowed(userId);
         if (!moves.capabilities().enabled()) throw BizException.of(ErrorCode.AI_DISABLED);
         long sourceId=OrganizationTemplateService.parseId(request.source().userFileId());
         var evidence=knowledge.source(userId,sourceId,
@@ -98,6 +99,9 @@ public class AiStrategyRecommendationService {
         // The existing agent performs strict model-response parsing, budget reservation,
         // a bounded prompt with real server evidence, and post-inference rechecks.
         List<Long> folderIds=candidates.stream().map(Template::folderId).toList();
+        // Latest preference is rechecked immediately before any provider call.
+        // In-flight requests cannot retroactively revoke an already-started call.
+        if(governance!=null)governance.ensureAllowed(userId);
         if(governance!=null)governance.record(userId,"CONSENT_GRANTED",folderIds.size());
         try {
         var proposal=moves.suggest(userId,new AiMoveAgentService.SuggestRequest(
@@ -115,9 +119,9 @@ public class AiStrategyRecommendationService {
         String id=UUID.randomUUID().toString();
         jdbc.update("""
             INSERT INTO ai_strategy_recommendation
-             (id,user_id,template_id,move_proposal_id,user_file_id)
-            VALUES (?,?,?,?,?)
-            """,id,userId,selected.id(),proposal.id(),sourceId);
+             (id,user_id,template_id,move_proposal_id,user_file_id,source_generation)
+            VALUES (?,?,?,?,?,?)
+            """,id,userId,selected.id(),proposal.id(),sourceId,request.source().generation());
         if(governance!=null)governance.record(userId,"RECOMMENDED",folderIds.size());
         return one(userId,id);
         } catch(RuntimeException failed) {
@@ -144,6 +148,16 @@ public class AiStrategyRecommendationService {
             UPDATE ai_strategy_recommendation SET status=?,feedback_code=?,feedback_at=NOW(3)
             WHERE id=? AND user_id=? AND status='PENDING'
               AND created_at >= NOW(3) - INTERVAL 24 HOUR
+              AND EXISTS (
+                  SELECT 1 FROM user_file u
+                  JOIN file_meta f ON f.file_id=u.file_id AND f.status=2
+                  JOIN knowledge_document k ON k.file_id=u.file_id
+                    AND k.generation=ai_strategy_recommendation.source_generation
+                    AND k.status IN ('READY','PARTIAL')
+                  WHERE u.id=ai_strategy_recommendation.user_file_id
+                    AND u.user_id=ai_strategy_recommendation.user_id
+                    AND u.status=0 AND u.is_dir=0
+              )
             """,request.decision(),request.reasonCode(),id,userId);
         if(changed!=1)throw BizException.of(ErrorCode.AI_SOURCE_CHANGED);
         return one(userId,id);
@@ -156,6 +170,8 @@ public class AiStrategyRecommendationService {
             JOIN user_file u ON u.id=r.user_file_id AND u.user_id=r.user_id
                 AND u.status=0 AND u.is_dir=0
             JOIN file_meta f ON f.file_id=u.file_id AND f.status=2
+            JOIN knowledge_document k ON k.file_id=u.file_id
+                AND k.generation=r.source_generation AND k.status IN ('READY','PARTIAL')
             WHERE r.user_id=? ORDER BY r.created_at DESC,r.id DESC LIMIT 15
             """,(rs,n)->rs.getString(1),userId);
         return ids.stream().map(id->one(userId,id)).toList();
@@ -189,6 +205,8 @@ public class AiStrategyRecommendationService {
             JOIN user_file u ON u.id=r.user_file_id AND u.user_id=r.user_id
                 AND u.status=0 AND u.is_dir=0
             JOIN file_meta f ON f.file_id=u.file_id AND f.status=2
+            JOIN knowledge_document k ON k.file_id=u.file_id
+                AND k.generation=r.source_generation AND k.status IN ('READY','PARTIAL')
             LEFT JOIN user_file folder ON folder.id=t.destination_id
                 AND folder.user_id=r.user_id AND folder.status=0 AND folder.is_dir=1
             WHERE r.id=? AND r.user_id=?

@@ -15,6 +15,8 @@ import java.util.regex.Pattern;
 public class AiStrategyPrivacyGovernanceService {
     private static final Pattern TICKET=Pattern.compile("[A-Z0-9][A-Z0-9_-]{7,63}");
     public record ConsentReceipt(String event,int candidateCount,String recordedAt) {}
+    public record StrategyPolicy(boolean recommendationsAllowed,boolean explicitChoice) {}
+    public record StrategyChoice(boolean allowRecommendations,boolean confirmed) {}
     public record RetentionPreview(long expiredRecommendations,long expiredConsentEvents,
                                    int maxRowsPerTable,boolean applyEnabled) {}
     public record CleanupRequest(boolean confirmed,String changeTicket) {}
@@ -27,6 +29,36 @@ public class AiStrategyPrivacyGovernanceService {
              @Value("${cloudchunk.ai.strategy-retention.apply-enabled:false}") boolean applyEnabled) {
         this.jdbc=jdbc;this.applyEnabled=applyEnabled;
     }
+    /** No saved preference means only the prior per-request consent is needed. */
+    @Transactional(readOnly=true)
+    public StrategyPolicy policy(long userId) {
+        List<Integer> stored=jdbc.query("""
+            SELECT allow_recommendations FROM ai_strategy_user_policy WHERE user_id=?
+            """,(rs,n)->rs.getInt(1),userId);
+        return stored.isEmpty()?new StrategyPolicy(true,false):
+                new StrategyPolicy(stored.getFirst()==1,true);
+    }
+
+    public void ensureAllowed(long userId) {
+        if(!policy(userId).recommendationsAllowed())
+            throw BizException.of(ErrorCode.AI_DISABLED,"future AI strategy recommendations disabled");
+    }
+
+    @Transactional(rollbackFor=Exception.class)
+    public StrategyPolicy choose(long userId,StrategyChoice request) {
+        if(userId<=0 || request==null || !request.confirmed())
+            throw BizException.of(ErrorCode.INVALID_PARAMETER,"confirm preference update");
+        jdbc.update("""
+            INSERT INTO ai_strategy_user_policy(user_id,allow_recommendations)
+            VALUES (?,?)
+            ON DUPLICATE KEY UPDATE allow_recommendations=VALUES(allow_recommendations),
+                updated_at=NOW(3)
+            """,userId,request.allowRecommendations()?1:0);
+        record(userId,request.allowRecommendations()?"RECOMMENDATIONS_ALLOWED":
+                "RECOMMENDATIONS_BLOCKED",0);
+        return new StrategyPolicy(request.allowRecommendations(),true);
+    }
+
     @Transactional(readOnly=true)
     public List<ConsentReceipt> history(long userId) {
         return jdbc.query("""
@@ -37,8 +69,11 @@ public class AiStrategyPrivacyGovernanceService {
     }
     /** Never record a source pointer, model response, endpoint or raw error. */
     public void record(long userId,String event,int count) {
-        if(userId<=0 || count<1 || count>8 || !("CONSENT_GRANTED".equals(event) ||
-                "RECOMMENDED".equals(event) || "REQUEST_FAILED".equals(event)))
+        boolean policyEvent="RECOMMENDATIONS_ALLOWED".equals(event) ||
+                "RECOMMENDATIONS_BLOCKED".equals(event);
+        if(userId<=0 || count<0 || count>8 || (policyEvent ? count!=0 :
+                count<1 || !("CONSENT_GRANTED".equals(event) ||
+                "RECOMMENDED".equals(event) || "REQUEST_FAILED".equals(event))))
             throw BizException.of(ErrorCode.INVALID_PARAMETER);
         jdbc.update("""
             INSERT INTO ai_strategy_consent_audit(user_id,event_code,candidate_count)
