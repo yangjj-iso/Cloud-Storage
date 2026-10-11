@@ -1,4 +1,4 @@
-name: M4.2 organizing strategies release gates
+name: M4.3 AI strategy recommendation gates
 on:
   pull_request:
     branches: [main]
