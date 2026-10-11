@@ -103,15 +103,15 @@ export function ResearchBriefPanel({ results, query, onSourceOpen }: {
     </div>
     <div className="kw-research-list">
       {hits.map(hit => (
-        <label key={keyFor(hit)} className="kw-research-row">
-          <input type="checkbox" checked={selected.includes(keyFor(hit))}
+        <div key={keyFor(hit)} className="kw-research-row">
+          <input type="checkbox" aria-label={`选择 ${hit.fileName} 的片段 ${hit.chunkIndex + 1}`} checked={selected.includes(keyFor(hit))}
             disabled={working || (!selected.includes(keyFor(hit)) && selected.length >= 12)}
             onChange={() => toggle(hit)} />
           <span className="kw-research-name">{hit.fileName}<small>片段 {hit.chunkIndex + 1} · 版本 {hit.generation}</small></span>
           <button type="button" className="kw-button" onClick={event => { event.preventDefault(); onSourceOpen(hit); }}>
             核对原文 <MaterialIcon>open_in_new</MaterialIcon>
           </button>
-        </label>
+        </div>
       ))}
     </div>
     <div className="kw-research-actions">

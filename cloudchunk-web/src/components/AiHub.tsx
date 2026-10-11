@@ -23,6 +23,12 @@ export function AiHub({ focusTick }: { focusTick: number }) {
   const [searchTick, setSearchTick] = useState(0);
 
   useEffect(() => {
+    const focus = () => { setSeed(''); setTab('explore'); setSearchTick(v => v + 1); };
+    window.addEventListener('cloudchunk:focus-ai-search', focus);
+    return () => window.removeEventListener('cloudchunk:focus-ai-search', focus);
+  }, []);
+
+  useEffect(() => {
     if (focusTick === 0) return;
     setSeed('');
     setTab('explore');
