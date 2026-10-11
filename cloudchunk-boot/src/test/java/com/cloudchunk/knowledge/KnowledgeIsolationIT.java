@@ -97,6 +97,8 @@ class KnowledgeIsolationIT {
         assertThrows(com.cloudchunk.common.exception.BizException.class,
             () -> planService.execute(1,id,2,yes));
         assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.cancel(1,id,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
             () -> planService.cancel(2,id,yes));
     }
 
