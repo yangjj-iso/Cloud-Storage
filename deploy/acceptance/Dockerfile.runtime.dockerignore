@@ -1,0 +1,5 @@
+# Only the locally built candidate jar enters this runtime build context.
+**
+!cloudchunk-boot
+!cloudchunk-boot/target
+!cloudchunk-boot/target/cloudchunk-boot.jar

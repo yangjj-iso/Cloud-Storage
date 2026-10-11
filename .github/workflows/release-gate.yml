@@ -1,4 +1,4 @@
-name: M4.6 product experience and release gates
+name: M4.7 product, upload-worker and release gates
 on:
   pull_request:
     branches: [main]
@@ -31,6 +31,9 @@ concurrency:
 jobs:
   product-acceptance:
     uses: ./.github/workflows/product-acceptance.yml
+
+  upload-worker-acceptance:
+    uses: ./.github/workflows/staging-acceptance.yml
 
   static-release:
     name: config and backup contract tests
@@ -149,7 +152,7 @@ jobs:
   live-readonly:
     name: protected production read-only gate
     if: github.event_name == 'workflow_dispatch' && inputs.live_readonly
-    needs: [static-release, build-verification, docker-restore-drill, product-acceptance]
+    needs: [static-release, build-verification, docker-restore-drill, product-acceptance, upload-worker-acceptance]
     runs-on: [self-hosted, linux, x64, cloudchunk-release]
     timeout-minutes: 10
     environment: production

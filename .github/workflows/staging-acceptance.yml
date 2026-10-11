@@ -1,0 +1,127 @@
+name: M4.7 upload-worker and staging acceptance
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type WRITE_SYNTHETIC_STAGING to use two dedicated empty staging accounts'
+        required: true
+        type: string
+      candidate_sha:
+        description: 'Exact 40-character revision stamped in the deployed candidate jar'
+        required: true
+        type: string
+      api_origin:
+        description: 'Approved staging HTTPS origin; must match environment variable STAGING_API_ORIGIN'
+        required: true
+        type: string
+      storage_origin:
+        description: 'Approved presigned PUT HTTPS origin; must match STAGING_STORAGE_ORIGIN'
+        required: true
+        type: string
+      live_model:
+        description: 'Require two real model attempts with synthetic evidence (may be billed)'
+        type: boolean
+        default: false
+      model_consent:
+        description: 'When enabled, type ALLOW_TWO_SYNTHETIC_MODEL_CALLS'
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  isolated:
+    name: isolated upload-index acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: cc-m47-${{ github.run_id }}-${{ github.run_attempt }}
+      M47_IMAGE_TAG: ${{ github.run_id }}-${{ github.run_attempt }}
+      M47_ENVIRONMENT: m47-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      M47_REPORT_DIR: ${{ github.workspace }}/artifacts/m47
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test acceptance safety contracts
+        run: python3 -m unittest discover -s deploy/acceptance/tests -v
+      - name: Build the candidate without skipping unit tests
+        run: mvn -B -pl cloudchunk-boot -am package
+      - name: Bind the packaged candidate and report to the actual checkout
+        run: |
+          echo "M47_EXPECTED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          mkdir -p "$M47_REPORT_DIR"
+          docker build --build-arg REVISION="$(git rev-parse HEAD)" \
+            -f deploy/acceptance/Dockerfile.runtime -t "cloudchunk-m47:$M47_IMAGE_TAG" .
+      - name: Start only the disposable internal topology
+        run: |
+          docker compose -f deploy/acceptance/compose.yml config --quiet
+          docker compose -f deploy/acceptance/compose.yml pull mysql redis minio namesrv broker acceptance
+          docker compose -f deploy/acceptance/compose.yml up -d mysql redis minio namesrv broker api worker
+      - name: Upload actual bytes and await real queue consumers
+        run: docker compose -f deploy/acceptance/compose.yml run --rm --no-deps acceptance
+      - name: Bounded disposable-service diagnostics on failure
+        if: failure()
+        run: docker compose -f deploy/acceptance/compose.yml logs --no-color --tail 80 api worker broker
+      - name: Remove this run's containers and anonymous volumes
+        if: always()
+        env:
+          M47_EXPECTED_SHA: unused-for-cleanup
+        run: docker compose -f deploy/acceptance/compose.yml down --volumes --remove-orphans
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m47-isolated-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/m47/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  staging:
+    name: explicitly authorized staging and optional live model
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.confirm == 'WRITE_SYNTHETIC_STAGING'
+    needs: isolated
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging-acceptance
+    concurrency:
+      group: cloudchunk-staging-acceptance
+      cancel-in-progress: false
+    env:
+      M47_MODE: staging
+      M47_CONFIRM: ${{ inputs.confirm }}
+      M47_API_ORIGIN: ${{ inputs.api_origin }}
+      M47_STORAGE_ORIGIN: ${{ inputs.storage_origin }}
+      M47_ALLOWED_API_ORIGIN: ${{ vars.STAGING_API_ORIGIN }}
+      M47_ALLOWED_STORAGE_ORIGIN: ${{ vars.STAGING_STORAGE_ORIGIN }}
+      M47_EXPECTED_SHA: ${{ inputs.candidate_sha }}
+      M47_ENVIRONMENT: ${{ vars.STAGING_ACCEPTANCE_ENVIRONMENT }}
+      M47_ACCOUNT: ${{ secrets.STAGING_ACCEPTANCE_ACCOUNT }}
+      M47_PASSWORD: ${{ secrets.STAGING_ACCEPTANCE_PASSWORD }}
+      M47_OTHER_ACCOUNT: ${{ secrets.STAGING_ACCEPTANCE_OTHER_ACCOUNT }}
+      M47_OTHER_PASSWORD: ${{ secrets.STAGING_ACCEPTANCE_OTHER_PASSWORD }}
+      M47_MODEL: ${{ inputs.live_model && 'true' || 'false' }}
+      M47_MODEL_CONSENT: ${{ inputs.model_consent }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Execute scoped synthetic staging journey (no provider keys in CI)
+        run: python3 deploy/acceptance/staging_journey.py --report artifacts/m47/staging.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m47-staging-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/m47/staging.json
+          if-no-files-found: error
+          retention-days: 7
