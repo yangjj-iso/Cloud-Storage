@@ -83,14 +83,21 @@ function AuthenticatedApp() {
     <div className="h-screen overflow-hidden bg-background text-on-background">
       <Sidebar />
       <div className="h-screen md:ml-[260px]">
-        <div className="sticky top-0 z-30 flex gap-xs border-b border-outline-variant bg-surface p-sm md:hidden" aria-label="移动端页面导航">
-          {([['ai','AI 工作台','auto_awesome'],['upload','上传','cloud_upload'],['drive','云盘','folder'],['files','文件','description']] as const).map(([target,label,icon]) => (
+        <div className="sticky top-0 z-30 flex gap-xs overflow-x-auto border-b border-outline-variant bg-surface p-sm md:hidden" aria-label="移动端页面导航">
+          {([['ai','AI 工作台','auto_awesome'],['upload','上传','cloud_upload'],['drive','云盘','folder'],['files','文件','description'],['shares','分享','share'],['recycle','回收站','delete']] as const).map(([target,label,icon]) => (
             <button key={target} type="button" onClick={() => setView(target)}
               aria-current={view === target ? 'page' : undefined}
-              className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-xs py-sm text-label-sm ${view === target ? 'bg-primary-container font-bold text-on-primary-container' : 'text-on-surface-variant'}`}>
+              className={`flex min-w-[76px] flex-none items-center justify-center gap-1 rounded-lg px-sm py-sm text-label-sm ${view === target ? 'bg-primary-container font-bold text-on-primary-container' : 'text-on-surface-variant'}`}>
               <MaterialIcon className="text-[18px]">{icon}</MaterialIcon>{label}
             </button>
           ))}
+          {authUser.role === 'admin' && (
+            <button type="button" onClick={() => setView('admin')}
+              aria-current={view === 'admin' ? 'page' : undefined}
+              className={`flex min-w-[76px] flex-none items-center justify-center gap-1 rounded-lg px-sm py-sm text-label-sm ${view === 'admin' ? 'bg-primary-container font-bold text-on-primary-container' : 'text-on-surface-variant'}`}>
+              <MaterialIcon className="text-[18px]">admin_panel_settings</MaterialIcon>管理
+            </button>
+          )}
         </div>
         <Topbar />
         <main className="h-screen overflow-y-auto pt-0 md:h-[calc(100vh-64px)] md:pt-0 md:mt-16">
