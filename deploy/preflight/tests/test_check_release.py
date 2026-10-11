@@ -46,6 +46,13 @@ class ReleasePreflightTest(unittest.TestCase):
             with self.assertRaises(preflight.PreflightError):
                 preflight.evaluate("ready", self.count(broken))
 
+    def test_v15_unique_key_must_have_two_columns_in_correct_order(self):
+        self.assertIn("HAVING COUNT(*)=2", preflight.V15_UNIQUE_RUN_FILE)
+        self.assertIn("column_name='run_id' AND seq_in_index=1",
+                      preflight.V15_UNIQUE_RUN_FILE)
+        self.assertIn("column_name='user_file_id' AND seq_in_index=2",
+                      preflight.V15_UNIQUE_RUN_FILE)
+
     def test_failed_flyway_history_is_a_hard_block(self):
         with self.assertRaisesRegex(preflight.PreflightError, "failed Flyway"):
             preflight.evaluate("ready", self.count({
