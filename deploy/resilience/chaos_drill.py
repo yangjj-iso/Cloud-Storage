@@ -162,7 +162,7 @@ def execute(journal, ticket, ack, runner=command):
         audit.append(journal, {"event": "DRILL_FINISHED" if summary["status"] == "PASS"
                                else "DRILL_FAILED", "run_id": run_id,
                                **({"reason_code": failure} if failure else {})})
-    summary["audit"] = audit.verify(journal)
+    if failure:\n        summary["reason_code"] = failure\n    summary["audit"] = audit.verify(journal)
     # Never include secret values or raw service output in reports.
     return summary
 
