@@ -37,7 +37,8 @@ class AiProviderFailureRecoveryTest {
                 .isInstanceOf(BizException.class)
                 .satisfies(e -> assertThat(((BizException)e).getErrorCode())
                     .isEqualTo(ErrorCode.AI_PROVIDER_UNAVAILABLE))
-                .hasMessageNotContaining("synthetic-provider-secret", "upstream-secret");
+                .hasMessageNotContaining("synthetic-provider-secret")
+                .hasMessageNotContaining("upstream-secret");
             unavailable.set(false);
             assertThat(gateway.complete("question", java.util.List.of())).isEqualTo("synthetic response");
         } finally {
