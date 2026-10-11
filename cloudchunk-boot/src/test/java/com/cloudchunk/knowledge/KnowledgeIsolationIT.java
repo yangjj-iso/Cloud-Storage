@@ -30,12 +30,14 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 16,"V16 strategy recommendation feedback migration must execute on fresh MySQL");
+        assertTrue(result.migrationsExecuted >= 17,"V17 privacy governance migration must execute on fresh MySQL");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
+        jdbc.update("DELETE FROM ai_strategy_consent_audit");
+        jdbc.update("DELETE FROM ai_strategy_retention_run");
         jdbc.update("DELETE FROM ai_strategy_recommendation");
         jdbc.update("DELETE FROM ai_organize_run_event");
         jdbc.update("DELETE FROM ai_organize_run_step");
@@ -58,6 +60,53 @@ class KnowledgeIsolationIT {
     private void publish(KnowledgeIndexStore.Claim c,String text) {
         tx.executeWithoutResult(s -> index.publish(c,text,"READY",null));
     }
+    @Test void strategyPrivacyHistoryIsOwnerScopedAndRetentionRequiresExplicitOperatorAction() {
+        var gov=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService(jdbc,false);
+        gov.record(1,"CONSENT_GRANTED",2);
+        gov.record(1,"RECOMMENDED",2);
+        gov.record(2,"CONSENT_GRANTED",1);
+        assertEquals(2,gov.history(1).size());
+        assertEquals(1,gov.history(2).size());
+        assertEquals("CONSENT_GRANTED",gov.history(2).getFirst().event());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            gov.record(1,"FREE_TEXT_PROMPT",1));
+
+        jdbc.update("UPDATE ai_strategy_consent_audit SET created_at=DATE_SUB(NOW(3),INTERVAL 181 DAY) WHERE user_id=1");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'MyFolder',1,0)");
+        var template=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+            jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class))
+            .create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Archive","TEXT","200"));
+        String moveId="aaaa1111-1111-4111-8111-111111111111";
+        insertMoveProposal(moveId,1,101,"Alice.txt");
+        jdbc.update("""
+            INSERT INTO ai_strategy_recommendation
+             (id,user_id,template_id,move_proposal_id,user_file_id,created_at)
+            VALUES (?,?,?,?,?,DATE_SUB(NOW(3),INTERVAL 91 DAY))
+            ""","bbbb2222-2222-4222-8222-222222222222",1L,template.id(),moveId,101L);
+        assertEquals(1,gov.preview().expiredRecommendations());
+        assertEquals(2,gov.preview().expiredConsentEvents());
+        assertFalse(gov.preview().applyEnabled());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            gov.purge(1,new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.CleanupRequest(
+                true,"CHANGE-REVIEW-123456")));
+
+        var allowed=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService(jdbc,true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            allowed.purge(1,new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.CleanupRequest(
+                false,"CHANGE-REVIEW-123456")));
+        var receipt=allowed.purge(1,
+            new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.CleanupRequest(
+                true,"CHANGE-REVIEW-123456"));
+        assertEquals(1,receipt.recommendationsPurged());
+        assertEquals(2,receipt.consentEventsPurged());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_move_proposal WHERE id=?",Integer.class,moveId));
+        assertEquals(0,gov.history(1).size());
+        assertEquals(1,gov.history(2).size());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_strategy_retention_run",Integer.class));
+        assertEquals(0,allowed.preview().expiredConsentEvents());
+    }
+
     @Test void aiStrategyRecommendationChecksTemplateOwnershipBeforeAgentAndFeedbackIsPrivate() {
         jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Research',1,0)");
         jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (201,2,'PrivateFolder',1,0)");

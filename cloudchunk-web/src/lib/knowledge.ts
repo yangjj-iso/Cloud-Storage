@@ -126,6 +126,11 @@ export interface StrategyRecommendation {
   feedbackCode: string | null;
   createdAt: string;
 }
+export interface StrategyConsentReceipt {
+  event: 'CONSENT_GRANTED' | 'RECOMMENDED' | 'REQUEST_FAILED';
+  candidateCount: number;
+  recordedAt: string;
+}
 export interface StrategyFeedbackQuality {
   accepted: number;
   rejected: number;
@@ -179,6 +184,8 @@ export const knowledgeApi = {
       signal,{decision,reasonCode,confirmed:true}),
   strategyRecommendationHistory: (signal: AbortSignal) =>
     request<StrategyRecommendation[]>('/assistant/strategy/recommendations', signal),
+  strategyConsentHistory: (signal: AbortSignal) =>
+    request<StrategyConsentReceipt[]>('/assistant/strategy/consent-history',signal),
   strategyFeedbackQuality: (signal: AbortSignal) =>
     request<StrategyFeedbackQuality>('/assistant/strategy/quality', signal),
 

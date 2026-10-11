@@ -167,6 +167,9 @@ cloudchunk:
     batch-size: 500
     max-batches-per-run: 20
   ai:
+    strategy-retention:
+      # Manual, ADMIN-only, approved cleanup; no automatic scheduler.
+      apply-enabled: ${AI_STRATEGY_RETENTION_APPLY_ENABLED:false}
     agent:
       # M2.8 starts with human-approved rename only; no autonomous file writes.
       rename-enabled: ${AI_AGENT_RENAME_ENABLED:false}

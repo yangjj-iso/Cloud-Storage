@@ -1,4 +1,4 @@
-name: M4.3 AI strategy recommendation gates
+name: M4.4 AI evaluation and privacy governance gates
 on:
   pull_request:
     branches: [main]
@@ -119,6 +119,8 @@ jobs:
       - run: npm ci && npm run build
         working-directory: cloudchunk-web
       - run: python3 -m unittest discover -s evaluation/tests -v
+      - name: Run reproducible synthetic strategy quality and authorization evaluator
+        run: python3 evaluation/strategy/evaluate_strategy.py
 
   docker-restore-drill:
     name: isolated Docker restore smoke

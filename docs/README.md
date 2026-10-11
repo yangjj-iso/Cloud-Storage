@@ -34,6 +34,7 @@
 | [M4.1 受控 Agent 工作流](./33-reviewed-agent-workflows.md) | 计划保存、逐步审批与执行、有限审计记录、Flyway V14 |
 | [M4.2 整理策略与模拟](./34-organizing-templates.md) | 规则模板、MIME 匹配、同名冲突与版本模拟、逐项确认执行 |
 | [M4.3 AI 推荐与反馈](./35-ai-strategy-feedback.md) | 已授权证据驱动的规则候选、单次反馈、用户级质量样本 |
+| [M4.4 质量评测与隐私治理](./36-ai-quality-privacy-governance.md) | 合成离线评分、用户授权记录、管理员保留期预检与有限处理 |
 | [08 基准测试与量化边界](./08-benchmark-metrics.md) | JMH、k6、Shell 脚本与指标解释 |
 | [前端 README](../cloudchunk-web/README.md) | Web 功能覆盖、开发代理和构建 |
 | [压测脚本 README](../deploy/bench/README.md) | k6/Shell 命令、认证和环境变量 |
@@ -71,6 +72,8 @@
 | AI 多步骤移动工作流（需逐步批准） | 已实现 | 已接入 |
 | 规则模板与冲突模拟（不调用模型） | 已实现 | 已接入 |
 | 证据驱动的 AI 策略推荐与分类型反馈 | 已实现 | 已接入 |
+| AI 推荐授权元数据历史 | 已实现 | 已接入 |
+| AI 隐私保留期预检与人工受控处理 | 已实现 | 管理员接口，默认禁止执行 |
 | IndexedDB 冷启动任务恢复 | 上传状态会写入 | 未实现自动恢复 |
 
 ## 文档维护规则
