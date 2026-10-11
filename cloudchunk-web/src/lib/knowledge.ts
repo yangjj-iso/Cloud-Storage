@@ -93,6 +93,24 @@ export interface AgentWorkflow {
   steps: AgentWorkflowStep[];
   events: AgentWorkflowEvent[];
 }
+export type OrganizeMimeCategory = 'ANY' | 'TEXT' | 'PDF' | 'IMAGE' | 'VIDEO';
+export type OrganizeStepState = 'READY' | 'APPROVED' | 'NOT_MATCHED' | 'ALREADY_THERE' | 'NAME_CONFLICT' | 'APPLIED' | 'SKIPPED';
+export interface OrganizeTemplate {
+  id: string;
+  name: string;
+  mimeCategory: OrganizeMimeCategory;
+  destinationId: string;
+  destinationName: string;
+  createdAt: string;
+}
+export interface OrganizeStep { number: number; userFileId: string; fileName: string; state: OrganizeStepState; originalParentId: string }
+export interface OrganizeAudit { number: number; action: string; at: string }
+export interface OrganizeRun {
+  id: string; templateId: string; name: string; mimeCategory: OrganizeMimeCategory;
+  destinationId: string; destinationName: string; status: 'ACTIVE' | 'CANCELLED' | 'COMPLETED' | 'EXPIRED';
+  expiresAt: string; matched: number; blocked: number; steps: OrganizeStep[]; events: OrganizeAudit[];
+}
+
 export interface AutoAskResponse {
   response: AnswerResponse;
   retrievalMode: SearchResult['mode'];
@@ -130,6 +148,26 @@ export interface BatchIndexResult { accepted: number; maxBatchSize: number }
 export interface ResearchBrief { evidence: Evidence[]; mode: 'EXACT_AUTHORIZED_EXCERPTS'; complete: boolean }
 
 export const knowledgeApi = {
+  organizationTemplates: (signal: AbortSignal) =>
+    request<OrganizeTemplate[]>('/organize/templates',signal),
+  createOrganizationTemplate: (name: string, mimeCategory: OrganizeMimeCategory,
+                                destinationId: string, signal: AbortSignal) =>
+    request<OrganizeTemplate>('/organize/templates',signal,{name,mimeCategory,destinationId}),
+  archiveOrganizationTemplate: (id: string, signal: AbortSignal) =>
+    request<void>('/organize/templates/'+encodeURIComponent(id)+'/archive',signal,{confirmed:true}),
+  simulateOrganization: (templateId: string,userFileIds: string[],signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/simulate',signal,{templateId,userFileIds}),
+  organizationRuns: (signal: AbortSignal) =>
+    request<OrganizeRun[]>('/organize/runs',signal),
+  organizationRun: (id: string,signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/runs/'+encodeURIComponent(id),signal),
+  organizationStep: (id: string,stepNo: number,action: 'approve' | 'execute' | 'skip',
+                     signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/runs/'+encodeURIComponent(id)+'/steps/'+stepNo+'/'+action,
+      signal,{confirmed:true}),
+  cancelOrganizationRun: (id: string,signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/runs/'+encodeURIComponent(id)+'/cancel',signal,{confirmed:true}),
+
   researchBrief: (sources: SourceRef[], signal: AbortSignal) =>
     request<ResearchBrief>('/research/brief', signal, { sources }),
   indexBatch: (userFileIds: string[], signal: AbortSignal) =>
