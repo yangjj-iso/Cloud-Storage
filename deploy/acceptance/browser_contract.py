@@ -57,10 +57,9 @@ class Backend:
         if method == 'GET' and path == '/api/v1/auth/me': reply(self.user); return
         if method == 'GET' and path == '/api/v1/quota/me':
             reply({'userId': 1, 'totalBytes': 1000000, 'usedBytes': 80, 'fileCount': 2, 'reservedBytes': 0, 'reservedFileCount': 0}); return
-        if method == 'GET' and path == '/api/v1/file':
+        if method == 'GET' and path in ('/api/v1/file', '/api/v1/share/list'):
             reply({'records': [], 'total': 0, 'size': 20, 'page': 1}); return
-        if method == 'GET' and path in ('/api/v1/share/list', '/api/v1/share/my', '/api/v1/share/mine',
-                                       '/api/v1/drive/list', '/api/v1/recycle/list'):
+        if method == 'GET' and path in ('/api/v1/drive/list', '/api/v1/recycle/list'):
             reply([]); return
         if method == 'GET' and path == '/api/v1/ping': reply({'status': 'UP'}); return
         if method == 'GET' and path == K + '/documents':
