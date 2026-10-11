@@ -13,6 +13,7 @@ import com.cloudchunk.core.knowledge.AiDailyCallBudget;
 import com.cloudchunk.core.knowledge.QdrantMirrorService;
 import com.cloudchunk.core.knowledge.AiRenameAgentService;
 import com.cloudchunk.core.knowledge.AiMoveAgentService;
+import com.cloudchunk.core.knowledge.AiWorkflowService;
 import com.cloudchunk.api.monitoring.KnowledgeRetrievalMetrics;
 import com.cloudchunk.api.monitoring.BusinessSliMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +35,7 @@ public class KnowledgeController {
     private final QdrantMirrorService mirror;
     private final AiRenameAgentService renameAgent;
     private final AiMoveAgentService moveAgent;
+    @org.springframework.beans.factory.annotation.Autowired private AiWorkflowService workflows;
     private final KnowledgeRetrievalMetrics retrievalMetrics;
     @Autowired(required = false) private BusinessSliMetrics businessSli;
     public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
@@ -140,6 +142,49 @@ public class KnowledgeController {
             @RequestParam long userFileId) {
         return noStore(moveAgent.folderChoices(UserContext.requireUserId(),userFileId));
     }
+    @PostMapping("/assistant/workflows")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> createWorkflow(
+            @RequestBody AiWorkflowService.CreateRequest request) {
+        return noStore(workflows.create(UserContext.requireUserId(),request));
+    }
+    @GetMapping("/assistant/workflows")
+    public ResponseEntity<R<java.util.List<AiWorkflowService.Summary>>> recentWorkflows() {
+        return noStore(workflows.recent(UserContext.requireUserId()));
+    }
+    @GetMapping("/assistant/workflows/{id}")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> workflow(@PathVariable String id) {
+        return noStore(workflows.detail(UserContext.requireUserId(),id));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/approve")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> approveWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.approve(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/skip")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> skipWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.skip(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/execute")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> executeWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.execute(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/undo")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> undoWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.undo(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/cancel")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> cancelWorkflow(
+            @PathVariable String id,@RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.cancel(UserContext.requireUserId(),id,request));
+    }
+
     @PostMapping("/assistant/move/batch/suggest")
     public ResponseEntity<R<AiMoveAgentService.BatchPreview>> batchSuggestMoves(
             @RequestBody AiMoveAgentService.BatchSuggestRequest request) {

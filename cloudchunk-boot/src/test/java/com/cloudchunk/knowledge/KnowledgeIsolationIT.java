@@ -30,12 +30,15 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 12,"V12 must actually execute");
+        assertTrue(result.migrationsExecuted >= 14,"V14 workflow schema must execute on fresh MySQL");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
+        jdbc.update("DELETE FROM ai_agent_workflow_event");
+        jdbc.update("DELETE FROM ai_agent_workflow_step");
+        jdbc.update("DELETE FROM ai_agent_workflow");
         jdbc.update("DELETE FROM ai_rename_proposal");
         jdbc.update("DELETE FROM ai_move_proposal");
         jdbc.update("DELETE FROM knowledge_document"); jdbc.update("DELETE FROM user_file"); jdbc.update("DELETE FROM file_meta");
@@ -50,6 +53,86 @@ class KnowledgeIsolationIT {
     private void publish(KnowledgeIndexStore.Claim c,String text) {
         tx.executeWithoutResult(s -> index.publish(c,text,"READY",null));
     }
+    @Test void durableAgentPlanRequiresOwnershipAndSequentialExplicitActions() {
+        // All proposals are synthetic; existing AiMoveAgentService tests cover actual
+        // file state, row-lock, sibling conflict and 15-minute conditional undo.
+        var move = mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var planService = new com.cloudchunk.core.knowledge.AiWorkflowService(jdbc,move);
+        var p1 = "11111111-1111-4111-8111-111111111111";
+        var p2 = "22222222-2222-4222-8222-222222222222";
+        var foreign = "33333333-3333-4333-8333-333333333333";
+        jdbc.update("INSERT INTO user_file(id,user_id,file_id,file_name) VALUES (103,1,?,'AliceSecond.txt')",FILE);
+        insertMoveProposal(p1,1,101,"Alice.txt");
+        insertMoveProposal(p2,1,103,"AliceSecond.txt");
+        insertMoveProposal(foreign,2,102,"Bob.txt");
+
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            planService.create(1,new com.cloudchunk.core.knowledge.AiWorkflowService.CreateRequest(
+                java.util.List.of(p1,foreign),true)));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_workflow",Integer.class));
+
+        var created = planService.create(1,
+            new com.cloudchunk.core.knowledge.AiWorkflowService.CreateRequest(
+                java.util.List.of(p1,p2),true));
+        String id=created.summary().id();
+        assertEquals("ACTIVE",created.summary().status());
+        assertEquals(2,created.summary().pending());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.detail(2,id));
+        var yes = new com.cloudchunk.core.knowledge.AiWorkflowService.ConfirmRequest(true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.approve(1,id,2,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.execute(1,id,1,yes));
+        assertEquals("APPROVED",planService.approve(1,id,1,yes).steps().getFirst().state());
+        assertEquals("APPLIED",planService.execute(1,id,1,yes).steps().getFirst().state());
+        verify(move).apply(eq(1L),eq(p1),any());
+        assertEquals("REVERTED",planService.undo(1,id,1,yes).steps().getFirst().state());
+        verify(move).undo(eq(1L),eq(p1),any());
+        planService.approve(1,id,2,yes);
+        var completed=planService.skip(1,id,2,yes);
+        assertEquals("COMPLETED",completed.summary().status());
+        assertEquals(6,jdbc.queryForObject(
+            "SELECT COUNT(*) FROM ai_agent_workflow_event WHERE workflow_id=?",Integer.class,id));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.execute(1,id,2,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.cancel(1,id,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.cancel(2,id,yes));
+    }
+
+    @Test void cancelledAgentPlanCannotApplyButCanUndoEarlierApprovedMove() {
+        var move=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var planner=new com.cloudchunk.core.knowledge.AiWorkflowService(jdbc,move);
+        var p1="44444444-4444-4444-8444-444444444444";
+        var p2="55555555-5555-4555-8555-555555555555";
+        jdbc.update("INSERT INTO user_file(id,user_id,file_id,file_name) VALUES (103,1,?,'Another.txt')",FILE);
+        insertMoveProposal(p1,1,101,"Alice.txt");
+        insertMoveProposal(p2,1,103,"Another.txt");
+        var confirmed=new com.cloudchunk.core.knowledge.AiWorkflowService.ConfirmRequest(true);
+        String id=planner.create(1,new com.cloudchunk.core.knowledge.AiWorkflowService.CreateRequest(
+            java.util.List.of(p1,p2),true)).summary().id();
+        planner.approve(1,id,1,confirmed);
+        planner.execute(1,id,1,confirmed);
+        assertEquals("CANCELLED",planner.cancel(1,id,confirmed).summary().status());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planner.approve(1,id,2,confirmed));
+        assertEquals("REVERTED",planner.undo(1,id,1,confirmed).steps().getFirst().state());
+        verify(move).undo(eq(1L),eq(p1),any());
+        verify(move,never()).apply(eq(1L),eq(p2),any());
+    }
+
+    private void insertMoveProposal(String id,long userId,long entry,String name) {
+        jdbc.update("""
+            INSERT INTO ai_move_proposal(id,user_id,user_file_id,generation,chunk_index,
+                original_name,source_parent_id,source_updated_at,destination_id,
+                destination_name,destination_parent_id,destination_updated_at,expires_at)
+            VALUES (?,?,?,1,0,?,0,NOW(3),900,'Synthetic folder',0,
+                    NOW(3),DATE_ADD(NOW(3),INTERVAL 10 MINUTE))
+            """,id,userId,entry,name);
+    }
+
     @Test void researchBriefRechecksActualOwnerAndGenerationAtExportTime() {
         var c = claim();
         publish(c, "citation text for export only");

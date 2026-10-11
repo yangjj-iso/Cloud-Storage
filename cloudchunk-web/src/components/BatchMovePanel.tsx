@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { knowledgeApi, type BatchMovePreview, type FolderChoices, type MoveProposal,
   type SearchResult, type SourceRef } from '../lib/knowledge';
 import { MaterialIcon } from './ui/MaterialIcon';
+import { AgentWorkflowPanel } from './AgentWorkflowPanel';
 
 function refFor(hit:SearchResult['evidence'][number]):SourceRef {
   return {userFileId:hit.userFileId,generation:hit.generation,chunkIndex:hit.chunkIndex};
@@ -23,6 +24,7 @@ export function BatchMovePanel({results}:{results:SearchResult}) {
   const [busy,setBusy]=useState(false);
   const [busyId,setBusyId]=useState<string|null>(null);
   const [error,setError]=useState('');
+  const [workflowId,setWorkflowId]=useState<string|null>(null);
   const abort=useRef<AbortController|null>(null);
   useEffect(()=>{
     const ctrl=new AbortController();
@@ -46,7 +48,7 @@ export function BatchMovePanel({results}:{results:SearchResult}) {
       if(!checked)return current.filter(x=>x!==id);
       return current.includes(id)||current.length>=4?current:[...current,id];
     });
-    setConsent(false);setPreview(null);setApproved([]);setApplied([]);setUndone([]);
+    setConsent(false);setPreview(null);setApproved([]);setApplied([]);setUndone([]);setWorkflowId(null);
   };
   const toggleFolder=(id:number,checked:boolean)=>{
     setSelectedFolders(current=>{
@@ -59,7 +61,7 @@ export function BatchMovePanel({results}:{results:SearchResult}) {
     if(!consent || !enabled || busy || selectedFiles.length===0 || selectedFolders.length===0)return;
     const chosen=sources.filter(s=>selectedFiles.includes(s.userFileId)).map(refFor);
     const ctrl=new AbortController();abort.current=ctrl;
-    setBusy(true);setConsent(false);setPreview(null);setError('');setApproved([]);setApplied([]);setUndone([]);
+    setBusy(true);setConsent(false);setPreview(null);setError('');setApproved([]);setApplied([]);setUndone([]);setWorkflowId(null);
     try {
       const result=await knowledgeApi.previewBatchMove(chosen,[...selectedFolders],true,ctrl.signal);
       if(!ctrl.signal.aborted)setPreview(result);
@@ -89,6 +91,21 @@ export function BatchMovePanel({results}:{results:SearchResult}) {
     }catch(e){setError(e instanceof Error?e.message:'无法撤销，文件可能已被修改');}
     finally{setBusyId(null);}
   };
+  const createWorkflow=async()=>{
+    if(!preview || busy || busyId || workflowId || preview.proposed===0)return;
+    const ids=preview.items.flatMap(item=>item.proposal?[item.proposal.id]:[]);
+    if(ids.length===0 || ids.length>4)return;
+    if(!window.confirm('将 '+ids.length+' 条已有 AI 移动建议加入可审计的执行计划？创建计划不会执行任何文件移动；之后仍需逐步审批和确认。'))return;
+    const ctrl=new AbortController();abort.current=ctrl;
+    setBusy(true);setError('');
+    try{
+      const created=await knowledgeApi.createWorkflow(ids,ctrl.signal);
+      if(!ctrl.signal.aborted)setWorkflowId(created.summary.id);
+    }catch(reason){
+      if(!ctrl.signal.aborted)setError(reason instanceof Error?reason.message:'创建计划失败，建议可能已过期');
+    }finally{if(abort.current===ctrl){abort.current=null;setBusy(false);}}
+  };
+
   if(!enabled || sources.length===0)return null;
   return <section className="kw-batch-organizer" aria-label="AI 批量整理预览">
     <div className="kw-eyebrow"><MaterialIcon>rule_folder</MaterialIcon>受控 AI 批量整理</div>
@@ -124,7 +141,7 @@ export function BatchMovePanel({results}:{results:SearchResult}) {
         {busy?'正在逐份生成建议…':'生成批量预览（不执行）'}
       </button>
     </>}
-    {preview && <div className="kw-batch-preview">
+    {preview && !workflowId && <div className="kw-batch-preview">
       <p role="status">共生成 {preview.proposed} 条建议；{preview.skipped} 份因权限、额度或目录不符而跳过。下面每一项都需单独批准。</p>
       {preview.items.map((entry,index)=>entry.proposal ?
         <div className="kw-batch-preview-item" key={entry.proposal.id}>
@@ -147,9 +164,14 @@ export function BatchMovePanel({results}:{results:SearchResult}) {
       : <div className="kw-batch-preview-item" key={'skip-'+index}>
           <strong>文件 {entry.source.userFileId}</strong><span>无法生成建议，未执行任何操作</span>
         </div>)}
+      {preview.proposed>0 && <button type="button" className="kw-button kw-rename-confirm"
+        disabled={busy || busyId!==null} onClick={()=>void createWorkflow()}>
+        <MaterialIcon>account_tree</MaterialIcon>保存为多步骤执行计划（不执行）
+      </button>}
       <button type="button" className="kw-button" disabled={busyId!==null}
         onClick={()=>{setPreview(null);setApproved([]);setConsent(false);}}>关闭预览并重新选择</button>
     </div>}
+    {workflowId && <AgentWorkflowPanel initialId={workflowId} />}
     {error && <p className="kw-error" role="alert">{error}</p>}
   </section>;
 }

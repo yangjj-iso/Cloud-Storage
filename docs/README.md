@@ -31,6 +31,7 @@
 | [M3.8 SLO 与事件闭环](./30-operations-slo-incident.md) | 只读观察指标、活动告警与运维审计状态机 |
 | [M3.9 业务 SLI 与故障复盘](./31-business-sli-postmortem.md) | 业务口径的监控与告警、审计式复盘草稿 |
 | [M4.0 AI-Native 工作台](./32-ai-native-workspace.md) | AI 首屏、研究工作流、授权批量索引与 Markdown 证据摘录 |
+| [M4.1 受控 Agent 工作流](./33-reviewed-agent-workflows.md) | 计划保存、逐步审批与执行、有限审计记录、Flyway V14 |
 | [08 基准测试与量化边界](./08-benchmark-metrics.md) | JMH、k6、Shell 脚本与指标解释 |
 | [前端 README](../cloudchunk-web/README.md) | Web 功能覆盖、开发代理和构建 |
 | [压测脚本 README](../deploy/bench/README.md) | k6/Shell 命令、认证和环境变量 |
@@ -65,6 +66,7 @@
 | AI-Native 资料工作台、全文搜索与问答 | 已实现 | 已接入 |
 | AI 批量资料索引（最多 8 份） | 已实现 | 已接入 |
 | 研究摘录（最多 12 段，导出前重新鉴权） | 已实现 | 已接入 |
+| AI 多步骤移动工作流（需逐步批准） | 已实现 | 已接入 |
 | IndexedDB 冷启动任务恢复 | 上传状态会写入 | 未实现自动恢复 |
 
 ## 文档维护规则

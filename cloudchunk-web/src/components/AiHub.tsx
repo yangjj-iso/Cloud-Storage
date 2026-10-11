@@ -4,6 +4,7 @@ import { MaterialIcon } from './ui/MaterialIcon';
 import { KnowledgeWorkspace } from './KnowledgeWorkspace';
 import { AiBatchIndexPanel } from './AiBatchIndexPanel';
 import { AiAgentHistory } from './AiAgentHistory';
+import { AgentWorkflowPanel } from './AgentWorkflowPanel';
 import './ai-hub.css';
 
 type Tab = 'overview' | 'explore' | 'prepare' | 'organize';
@@ -90,9 +91,10 @@ export function AiHub({ focusTick }: { focusTick: number }) {
       {tab === 'organize' && (
         <div className="ai-hub-organize">
           <div className="ai-hub-section-head">
-            <div><h2>可审核的智能整理</h2><p>先在搜索结果中选文件，再生成候选文件夹建议。每条修改都要独立确认，允许条件撤销。</p></div>
+            <div><h2>可审核的智能整理</h2><p>从搜索结果生成候选目录建议并保存成执行计划。每一步单独审核、确认、记录和条件撤销。</p></div>
             <button type="button" className="ai-hub-outline" onClick={() => explore()}>寻找待整理的文件 <MaterialIcon>arrow_forward</MaterialIcon></button>
           </div>
+          <AgentWorkflowPanel />
           <AiAgentHistory />
           <div className="ai-hub-safety">
             <MaterialIcon>fact_check</MaterialIcon>

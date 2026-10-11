@@ -67,6 +67,32 @@ export interface AnswerResponse {
   citations: { citationId: string; evidence: Evidence }[];
   mode: 'MODEL_WITH_CITATIONS' | 'INSUFFICIENT_EVIDENCE';
 }
+export type WorkflowStepState = 'PENDING' | 'APPROVED' | 'APPLIED' | 'SKIPPED' | 'REVERTED';
+export type WorkflowState = 'ACTIVE' | 'CANCELLED' | 'COMPLETED';
+export interface AgentWorkflowSummary {
+  id: string;
+  status: WorkflowState;
+  total: number;
+  applied: number;
+  skipped: number;
+  pending: number;
+  createdAt: string;
+}
+export interface AgentWorkflowStep {
+  stepNo: number;
+  moveProposalId: string;
+  userFileId: string;
+  fileName: string;
+  destinationName: string;
+  expiresAt: string;
+  state: WorkflowStepState;
+}
+export interface AgentWorkflowEvent { stepNo: number; action: string; recordedAt: string }
+export interface AgentWorkflow {
+  summary: AgentWorkflowSummary;
+  steps: AgentWorkflowStep[];
+  events: AgentWorkflowEvent[];
+}
 export interface AutoAskResponse {
   response: AnswerResponse;
   retrievalMode: SearchResult['mode'];
@@ -143,6 +169,18 @@ export const knowledgeApi = {
     request<MoveProposal>('/assistant/move/suggest',signal,{source,consent,candidateFolderIds}),
   applyMove: (id: string, confirmed: boolean, signal: AbortSignal) =>
     request<MoveApplyResult>('/assistant/move/'+encodeURIComponent(id)+'/apply',signal,{confirmed}),
+  createWorkflow: (moveProposalIds: string[], signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows',signal,{moveProposalIds,confirmed:true}),
+  recentWorkflows: (signal: AbortSignal) =>
+    request<AgentWorkflowSummary[]>('/assistant/workflows',signal),
+  workflow: (id: string, signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows/'+encodeURIComponent(id),signal),
+  workflowAction: (id: string, stepNo: number, action: 'approve' | 'skip' | 'execute' | 'undo',
+                   signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows/'+encodeURIComponent(id)+'/steps/'+stepNo+'/'+action,
+      signal,{confirmed:true}),
+  cancelWorkflow: (id: string, signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows/'+encodeURIComponent(id)+'/cancel',signal,{confirmed:true}),
   recentMoveProposals: (signal: AbortSignal) =>
     request<MoveProposal[]>('/assistant/move/recent',signal),
   previewBatchMove: (sources: SourceRef[],candidateFolderIds: number[],consent: boolean,signal: AbortSignal) =>
