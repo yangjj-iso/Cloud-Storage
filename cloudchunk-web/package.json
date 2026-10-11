@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "build": "tsc -b && vite build --manifest",
     "preview": "vite preview --port 5173"
   },
   "dependencies": {

@@ -1,0 +1,29 @@
+.ai-workflow-progress { margin: 1rem 0; padding: 1rem; border: 1px solid var(--md-sys-color-outline-variant, #cbd5e1); border-radius: 12px; }
+.ai-workflow-progress label { display: grid; gap: .5rem; font-weight: 600; }
+.ai-workflow-progress progress { width: 100%; height: .65rem; accent-color: #2563eb; }
+.ai-workflow-progress p { margin: .75rem 0 .35rem; }
+.ai-workflow-progress small { display: block; line-height: 1.6; }
+.ai-workflow-steps > li[aria-current="step"] .ai-workflow-marker { outline: 2px solid #2563eb; outline-offset: 3px; }
+.ai-workflows button:focus-visible, .kw-batch-organizer button:focus-visible, .kw-batch-organizer input:focus-visible, .ai-strategy button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+.ai-workflow-step, .ai-workflows-details, .kw-batch-preview-item { min-width: 0; overflow-wrap: anywhere; }
+.ai-workflow-actions { flex-wrap: wrap; }
+/* Grid's automatic minimum otherwise expands the entire mobile strategy panel.
+   Wrap content and controls rather than hiding horizontal overflow from acceptance. */
+.ai-strategy { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.ai-strategy .ai-strategy-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+.ai-strategy .ai-strategy-column, .ai-strategy .ai-strategy-results,
+.ai-strategy .ai-strategy-label input, .ai-strategy .ai-strategy-label select,
+.ai-strategy .ai-strategy-summary > *, .ai-strategy .ai-strategy-step-actions { min-width: 0; max-width: 100%; }
+.ai-strategy button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 1000px) {
+  .ai-strategy .ai-strategy-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .ai-workflows-layout { grid-template-columns: minmax(0, 1fr); }
+  .ai-workflow-progress { padding: .75rem; }
+  .ai-workflow-actions button { min-height: 44px; }
+  .ai-strategy .ai-strategy-summary { grid-template-columns: minmax(0, 1fr); }
+  .ai-strategy .ai-strategy-file { flex-wrap: wrap; }
+  .ai-strategy .ai-strategy-file > .ai-hub-outline { margin-left: auto; min-height: 44px; }
+  .ai-strategy .ai-hub-primary, .ai-strategy .ai-hub-outline { min-height: 44px; }
+}

@@ -1,0 +1,2 @@
+# Test-only browser runner; never installed in production images.
+playwright==1.57.0
