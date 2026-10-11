@@ -13,6 +13,8 @@ import com.cloudchunk.core.knowledge.QdrantMirrorService;
 import com.cloudchunk.core.knowledge.AiRenameAgentService;
 import com.cloudchunk.core.knowledge.AiMoveAgentService;
 import com.cloudchunk.api.monitoring.KnowledgeRetrievalMetrics;
+import com.cloudchunk.api.monitoring.BusinessSliMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -31,6 +33,7 @@ public class KnowledgeController {
     private final AiRenameAgentService renameAgent;
     private final AiMoveAgentService moveAgent;
     private final KnowledgeRetrievalMetrics retrievalMetrics;
+    @Autowired(required = false) private BusinessSliMetrics businessSli;
     public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
                                SemanticIndexService semantic, HybridSearchService hybrid,
                                AutoAnswerService autoAnswer, AiDailyCallBudget budget,
@@ -85,7 +88,9 @@ public class KnowledgeController {
     }
     @PostMapping("/assistant/ask")
     public ResponseEntity<R<AutoAskResponse>> autoAsk(@RequestBody AutoAskRequest request) {
-        return noStore(autoAnswer.ask(UserContext.requireUserId(), request));
+        AutoAskResponse response = autoAnswer.ask(UserContext.requireUserId(), request);
+        if (businessSli != null) businessSli.aiRetrieval(response.retrievalMode());
+        return noStore(response);
     }
     @GetMapping("/assistant/rename/capabilities")
     public ResponseEntity<R<AiRenameAgentService.Capabilities>> renameCapabilities() {
@@ -152,8 +157,10 @@ public class KnowledgeController {
     @PostMapping("/semantic/search")
     public ResponseEntity<R<SearchResult>> semanticSearch(@RequestBody SemanticSearchRequest request) {
         long userId=UserContext.requireUserId();
-        return noStore(retrievalMetrics.measure("hybrid",
-            ()->hybrid.search(userId,request.query(),request.consent())));
+        SearchResult response = retrievalMetrics.measure("hybrid",
+            ()->hybrid.search(userId,request.query(),request.consent()));
+        if (businessSli != null) businessSli.aiRetrieval(response.mode());
+        return noStore(response);
     }
     @PostMapping("/documents/{id}/semantic-index")
     public ResponseEntity<R<SemanticIndexService.Status>> semanticIndex(@PathVariable long id,
