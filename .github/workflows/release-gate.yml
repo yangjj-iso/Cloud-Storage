@@ -1,4 +1,4 @@
-name: M4.4 AI evaluation and privacy governance gates
+name: M4.5 reviewed feedback and consent lifecycle gates
 on:
   pull_request:
     branches: [main]

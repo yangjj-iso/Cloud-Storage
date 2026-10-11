@@ -53,6 +53,8 @@ class SecurityConfigTest {
 
         mvc.perform(get("/api/v1/private").header("Authorization", "Bearer user-token"))
                 .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/strategy-feedback-reviews").header("Authorization", "Bearer user-token"))
+                .andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/admin/strategy-retention/preview").header("Authorization", "Bearer user-token"))
                 .andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/admin/operations").header("Authorization", "Bearer user-token"))
@@ -69,6 +71,8 @@ class SecurityConfigTest {
         when(authService.resolvePrincipal("admin-token"))
                 .thenReturn(Optional.of(new AuthenticatedPrincipal(1L, "admin")));
 
+        mvc.perform(get("/api/v1/admin/strategy-feedback-reviews").header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk());
         mvc.perform(get("/api/v1/admin/strategy-retention/preview").header("Authorization", "Bearer admin-token"))
                 .andExpect(status().isOk());
         mvc.perform(get("/api/v1/admin/operations").header("Authorization", "Bearer admin-token"))
@@ -118,6 +122,7 @@ class SecurityConfigTest {
         @GetMapping("/api/v1/private") R<String> privateRoute() { return R.ok("ok"); }
         @GetMapping("/api/v1/admin/test") R<String> adminRoute() { return R.ok("ok"); }
         @GetMapping("/api/v1/admin/health-summary") R<String> adminHealth() { return R.ok("mock-safe"); }
+        @GetMapping("/api/v1/admin/strategy-feedback-reviews") R<String> reviewQueue() { return R.ok("category-only"); }
         @GetMapping("/api/v1/admin/strategy-retention/preview") R<String> retentionPreview() { return R.ok("dry-run"); }
         @GetMapping("/api/v1/admin/operations") R<String> adminOps() { return R.ok("mock-safe"); }
         @GetMapping("/actuator/health") R<String> health() { return R.ok("UP"); }

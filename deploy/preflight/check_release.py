@@ -31,6 +31,25 @@ SELECT COUNT(*) FROM (
 FAILED_MIGRATIONS = "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0"
 V13_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='13' AND success=1")
+V18_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
+                 "WHERE version='18' AND success=1")
+V18_TABLES = """
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_schema=DATABASE() AND table_name IN
+ ('ai_strategy_user_policy','ai_strategy_feedback_review')
+"""
+V18_GENERATION_COLUMN = """
+SELECT COUNT(*) FROM information_schema.columns
+WHERE table_schema=DATABASE() AND table_name='ai_strategy_recommendation'
+ AND column_name='source_generation' AND data_type='bigint'
+"""
+V18_UNIQUE_REVIEW = """
+SELECT COUNT(*) FROM information_schema.statistics
+WHERE table_schema=DATABASE() AND table_name='ai_strategy_feedback_review'
+ AND index_name='uk_strategy_review_recommendation' AND non_unique=0
+ AND column_name='recommendation_id' AND seq_in_index=1
+"""
+
 V17_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='17' AND success=1")
 V17_PRIVACY_TABLES = """
@@ -210,6 +229,15 @@ def evaluate(phase, query_count, health_base=None, health_check=check_health):
             raise PreflightError("V17 migration missing")
         if query_count(V17_PRIVACY_TABLES, "privacy governance tables") != 2:
             raise PreflightError("privacy tables missing")
+        if query_count(V18_INSTALLED, "Flyway V18") != 1:
+            raise PreflightError("V18 privacy preference migration not installed")
+        if query_count(V18_TABLES, "V18 preference and review tables") != 2:
+            raise PreflightError("V18 user consent or review tables missing")
+        if query_count(V18_GENERATION_COLUMN, "source generation column") != 1:
+            raise PreflightError("source generation binding absent")
+        if query_count(V18_UNIQUE_REVIEW, "unique review request") != 1:
+            raise PreflightError("duplicate review constraint missing")
+        counts["strategy_review_schema"] = "VERIFIED"
         counts["ai_privacy_governance_schema"] = "VERIFIED"
         counts["ai_strategy_feedback_schema"] = "VERIFIED"
         counts["organizing_strategy_schema"] = "VERIFIED"
