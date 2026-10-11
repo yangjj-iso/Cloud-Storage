@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type AdminHealthSnapshot, type AdminHealthComponent } from '../lib/api';
 import { MaterialIcon } from './ui/MaterialIcon';
+import { OperationsPanel } from './OperationsPanel';
 
 const labels: Record<AdminHealthComponent['id'], string> = {
   mysql: 'MySQL 数据库',
@@ -89,6 +90,7 @@ export function SystemHealth() {
           </p>
         </>
       )}
+      <OperationsPanel />
     </div>
   );
 }

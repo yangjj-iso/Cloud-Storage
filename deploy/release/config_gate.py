@@ -163,6 +163,13 @@ def check_compose(config):
                 raise GateError(name + " must have no published ports in production")
             if not loopback_port(port):
                 raise GateError(name + " published ports must bind to loopback")
+    api_env = services["api"].get("environment") or {}
+    if api_env.get("OPS_PROMETHEUS_URL") not in ("", "http://prometheus:9090"):
+        raise GateError("API Prometheus read-only query endpoint must be private")
+    if api_env.get("OPS_ALERTMANAGER_URL") not in ("", "http://alertmanager:9093"):
+        raise GateError("API Alertmanager read-only query endpoint must be private")
+    if api_env.get("OPS_PROMETHEUS_URL") == "" or api_env.get("OPS_ALERTMANAGER_URL") == "":
+        raise GateError("production operations sources must be explicitly connected")
     if services["api"]["image"] != services["worker"]["image"]:
         raise GateError("api and worker must use exactly the same backend digest")
 

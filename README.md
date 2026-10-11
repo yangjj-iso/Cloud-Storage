@@ -166,6 +166,7 @@ npm run dev
 - [M3.6 生产稳定性 P0](./docs/27-production-stability.md)：私有令牌监控、告警规则、发布后自动验收与受控镜像回滚。
 - [M3.6 P1 依赖健康与故障回归](./docs/28-dependency-resilience.md)：只读管理员依赖状态、模拟故障与安全降级验收。
 - [M3.7 生产韧性验收](./docs/29-resilience-acceptance.md)：隔离 Docker 故障演练、Alertmanager 告警路由与审计证据。
+- [M3.8 SLO 与故障处置闭环](./docs/30-operations-slo-incident.md)：管理员只读 SLO、活动告警、审计式事件生命周期与复盘清单。
 
 ## 验证
 

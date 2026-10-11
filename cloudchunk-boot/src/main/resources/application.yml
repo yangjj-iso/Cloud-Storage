@@ -82,6 +82,8 @@ cloudchunk:
     # 仅在受信任网络中设为 true，供 Prometheus 无状态抓取指标。
     prometheus-public: ${PROMETHEUS_PUBLIC:false}
     prometheus-scrape-token: ${METRICS_SCRAPE_TOKEN:}
+    prometheus-query-url: ${OPS_PROMETHEUS_URL:}
+    alertmanager-query-url: ${OPS_ALERTMANAGER_URL:}
   auth:
     token-ttl: P7D
   websocket:

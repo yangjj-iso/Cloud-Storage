@@ -24,6 +24,9 @@ services:
     image: ${CC_QDRANT_IMAGE:?pin_qdrant_digest}
     ports: !reset []
   api:
+    environment:
+      OPS_PROMETHEUS_URL: http://prometheus:9090
+      OPS_ALERTMANAGER_URL: http://alertmanager:9093
     image: ${CLOUDCHUNK_API_IMAGE:?pin_backend_digest}
     build: !reset null
     ports: !reset []
