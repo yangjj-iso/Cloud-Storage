@@ -4,6 +4,7 @@ import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +43,7 @@ public class AiStrategyRecommendationService {
     private final JdbcTemplate jdbc;
     private final KnowledgeService knowledge;
     private final AiMoveAgentService moves;
+    @Autowired(required=false) private AiStrategyPrivacyGovernanceService governance;
 
     public AiStrategyRecommendationService(JdbcTemplate jdbc,KnowledgeService knowledge,
                                            AiMoveAgentService moves) {
@@ -96,6 +98,8 @@ public class AiStrategyRecommendationService {
         // The existing agent performs strict model-response parsing, budget reservation,
         // a bounded prompt with real server evidence, and post-inference rechecks.
         List<Long> folderIds=candidates.stream().map(Template::folderId).toList();
+        if(governance!=null)governance.record(userId,"CONSENT_GRANTED",folderIds.size());
+        try {
         var proposal=moves.suggest(userId,new AiMoveAgentService.SuggestRequest(
                 request.source(),true,folderIds));
         Template selected=candidates.stream().filter(t->
@@ -114,7 +118,13 @@ public class AiStrategyRecommendationService {
              (id,user_id,template_id,move_proposal_id,user_file_id)
             VALUES (?,?,?,?,?)
             """,id,userId,selected.id(),proposal.id(),sourceId);
+        if(governance!=null)governance.record(userId,"RECOMMENDED",folderIds.size());
         return one(userId,id);
+        } catch(RuntimeException failed) {
+            // No exception text, model output, file ID or provider URL in the audit.
+            if(governance!=null)governance.record(userId,"REQUEST_FAILED",folderIds.size());
+            throw failed;
+        }
     }
 
     /** Feedback is owner-scoped, one-shot and categorized; no model requests. */
