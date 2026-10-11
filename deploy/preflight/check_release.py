@@ -31,6 +31,14 @@ SELECT COUNT(*) FROM (
 FAILED_MIGRATIONS = "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0"
 V13_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='13' AND success=1")
+V17_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
+                 "WHERE version='17' AND success=1")
+V17_PRIVACY_TABLES = """
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_schema=DATABASE()
+ AND table_name IN ('ai_strategy_consent_audit','ai_strategy_retention_run')
+"""
+
 V16_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='16' AND success=1")
 V16_RECOMMENDATION_TABLE = """
