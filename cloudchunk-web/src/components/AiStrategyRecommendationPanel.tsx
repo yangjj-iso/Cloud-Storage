@@ -169,6 +169,16 @@ export function AiStrategyRecommendationPanel({ results }: { results: SearchResu
         {quality.acceptanceRatio!==null? ` · 反馈接受占比 ${(quality.acceptanceRatio*100).toFixed(1)}%`:' · 少于 5 个有效反馈，不展示比例'}</span>
         :<span>反馈统计暂不可用</span>}
       <small>仅统计主动反馈，不代表模型准确率，也不会自动用于模型训练。最近记录仅显示本人仍有权访问的文件。</small>
+      <details>
+        <summary>我的模型授权记录（最近 30 条）</summary>
+        {consents.length===0 ? <p>暂无可展示的授权事件</p> :
+          consents.map((entry,index)=><p key={index}>
+            {entry.event==='CONSENT_GRANTED'?'已授权模型请求':
+              entry.event==='RECOMMENDED'?'已生成推荐':'本次请求未完成'}
+            {' · '}候选 {entry.candidateCount} 项{' · '}{entry.recordedAt}
+          </p>)}
+        <small>记录只包含操作状态、候选数量和时间，不含文件正文或模型输出。</small>
+      </details>
       {history.length>0&&<details><summary>查看最近推荐记录（最多 15 条）</summary>
         {history.slice(0,15).map(item=><p key={item.id}>{item.fileName} → {item.templateName}
           {' · '}{item.state==='ACCEPTED'?'有帮助':item.state==='REJECTED'?'未采纳':'待反馈'}</p>)}
