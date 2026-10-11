@@ -53,7 +53,7 @@ public class KnowledgeController {
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
     public record SearchRequest(String query) {}
-    public record BatchIndexRequest(java.util.List<Long> userFileIds) {}
+    public record BatchIndexRequest(java.util.List<String> userFileIds) {}
 
     @GetMapping("/documents")
     public ResponseEntity<R<Library>> library(@RequestParam(defaultValue="1") int page) {

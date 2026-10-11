@@ -53,16 +53,18 @@ class KnowledgeIsolationIT {
     @Test void bulkIndexIsAllOrNothingForUnownedEntriesAndBounded() {
         // Both entries reference one physical object, but only entry 101 belongs to user 1.
         assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
-            service.requestIndexBatch(1, java.util.List.of(101L, 102L)));
+            service.requestIndexBatch(1, java.util.List.of("101", "102")));
         assertEquals(0, jdbc.queryForObject(
             "SELECT COUNT(*) FROM knowledge_document", Integer.class));
         assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
-            service.requestIndexBatch(1, java.util.List.of(101L, 101L)));
+            service.requestIndexBatch(1, java.util.List.of("101", "101")));
         assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
             service.requestIndexBatch(1, java.util.List.of()));
         assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
-            service.requestIndexBatch(1, java.util.List.of(101L, -1L)));
-        var result = service.requestIndexBatch(1, java.util.List.of(101L));
+            service.requestIndexBatch(1, java.util.List.of("101", "-1")));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of("9223372036854775808")));
+        var result = service.requestIndexBatch(1, java.util.List.of("101"));
         assertEquals(1, result.accepted());
         assertEquals(8, result.maxBatchSize());
         assertEquals(1, jdbc.queryForObject(
