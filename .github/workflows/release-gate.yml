@@ -84,8 +84,14 @@ jobs:
           docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
             prom/prometheus:v2.55.1 check rules /etc/cloudchunk-observability/rules/cloudchunk-alerts.yml
+          ci_token="$(mktemp)"
+          trap 'rm -f "$ci_token"' EXIT
+          printf 'ci-test-scrape-token-nonsecret' > "$ci_token"
+          chmod 600 "$ci_token"
           docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
+            -v "$PWD/deploy/observability/rules:/etc/prometheus/rules:ro" \
+            -v "$ci_token:/etc/prometheus/metrics-token:ro" \
             prom/prometheus:v2.55.1 check config /etc/cloudchunk-observability/prometheus.prod.yml
           docker run --rm --entrypoint /bin/amtool \
             -v "$PWD/deploy/observability:/etc/cloudchunk-observability:ro" \
