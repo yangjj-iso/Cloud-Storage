@@ -7,6 +7,11 @@ const knownAlerts: Record<string, string> = {
   CloudChunkApiHigh5xx: 'API 5xx 错误率升高',
   CloudChunkApiP99LatencyHigh: 'API P99 时延升高',
   CloudChunkHikariConnectionsExhausted: '数据库连接池持续等待',
+  CloudChunkUploadMergeServerFailures: '上传合并服务器错误率升高',
+  CloudChunkDownloadStreamFailures: '下载流中断或失败率升高',
+  CloudChunkOutboxOverdue: '异步 Outbox 持续积压',
+  CloudChunkAiFallbackHigh: 'AI 检索降级率升高',
+  CloudChunkBusinessSliSamplerDown: '业务异步 SLI 数据采集失败',
 };
 
 function formatPercentage(value: number | null) {

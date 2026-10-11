@@ -42,3 +42,8 @@ groups:
         for: 10m
         labels: {severity: warning, service: ai}
         annotations: {summary: "High proportion of fallback retrieval responses"}
+      - alert: CloudChunkBusinessSliSamplerDown
+        expr: cloudchunk_business_async_sample_valid == 0
+        for: 5m
+        labels: {severity: warning, service: async}
+        annotations: {summary: "Async business SLI sampler failed: values must not be treated as zero"}

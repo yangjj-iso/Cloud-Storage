@@ -33,7 +33,10 @@ public class OperationsOverviewService {
     private static final int EXPECTED_SEVEN_DAY_SAMPLES = 7 * 24 * 60 * 4; // 15s
     private static final Set<String> KNOWN_ALERTS = Set.of(
             "CloudChunkApiScrapeDown", "CloudChunkApiHigh5xx",
-            "CloudChunkApiP99LatencyHigh", "CloudChunkHikariConnectionsExhausted");
+            "CloudChunkApiP99LatencyHigh", "CloudChunkHikariConnectionsExhausted",
+            "CloudChunkUploadMergeServerFailures", "CloudChunkDownloadStreamFailures",
+            "CloudChunkOutboxOverdue", "CloudChunkAiFallbackHigh",
+            "CloudChunkBusinessSliSamplerDown");
 
     private static final String SEVEN_TOTAL =
             "sum(increase(http_server_requests_seconds_count{job=\"cloudchunk-api\"}[7d])) or vector(0)";

@@ -6,6 +6,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -17,6 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * completion-event counters or proven message delivery rates.
  */
 @Component
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class BusinessSliMetrics {
     private static final String FILE_STATES = """
         SELECT
