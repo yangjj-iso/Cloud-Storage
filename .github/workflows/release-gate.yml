@@ -132,7 +132,7 @@ jobs:
         run: docker info
       - name: Restore synthetic SQL and cold volumes in isolated disposable Docker
         run: python3 -m unittest discover -s deploy/release/docker_tests -p test_restore_docker.py -v
-      - name: Exercise isolated Redis, MinIO and RocketMQ outage/recovery
+      - name: Pull only the isolated synthetic drill images\n        run: docker compose -f deploy/resilience/compose.yml -p ccdrill-image-verify pull\n      - name: Exercise isolated Redis, MinIO and RocketMQ outage/recovery
         run: python3 -m unittest discover -s deploy/release/docker_tests -p test_dependency_chaos_docker.py -v
       - name: Confirm synthetic Alertmanager webhook delivery on private Docker network
         run: python3 -m unittest discover -s deploy/release/docker_tests -p test_alert_delivery_docker.py -v
