@@ -62,7 +62,7 @@ def score(cases):
         eligible+=1
         b["eligible"]+=1
         raw=case["model_output"]
-        m=CHOICE.fullmatch(raw) if isinstance(raw,str) and "\n" not in raw and "\r" not in raw else None
+        m=CHOICE.fullmatch(raw.strip()) if isinstance(raw,str) and len(raw)<=24 and "\n" not in raw and "\r" not in raw else None
         if not m or int(m.group(1))>case["candidate_count"]:
             invalid+=1
             continue
