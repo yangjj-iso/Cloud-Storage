@@ -31,6 +31,20 @@ SELECT COUNT(*) FROM (
 FAILED_MIGRATIONS = "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0"
 V13_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
                  "WHERE version='13' AND success=1")
+V14_INSTALLED = ("SELECT COUNT(*) FROM flyway_schema_history "
+                 "WHERE version='14' AND success=1")
+V14_WORKFLOW_TABLES = """
+SELECT COUNT(*) FROM information_schema.tables
+WHERE table_schema=DATABASE()
+ AND table_name IN ('ai_agent_workflow','ai_agent_workflow_step','ai_agent_workflow_event')
+"""
+V14_UNIQUE_MOVE = """
+SELECT COUNT(*) FROM information_schema.statistics
+WHERE table_schema=DATABASE()
+ AND table_name='ai_agent_workflow_step'
+ AND index_name='uk_agent_workflow_move' AND non_unique=0
+"""
+
 V13_UNIQUE_INDEX = """
 SELECT COUNT(*) FROM (
  SELECT index_name FROM information_schema.statistics
@@ -132,6 +146,13 @@ def evaluate(phase, query_count, health_base=None, health_check=check_health):
             raise PreflightError("V13 unique index absent or shape invalid")
         if query_count(V13_GENERATED_COLUMN, "active name column") != 1:
             raise PreflightError("V13 generated column absent")
+        if query_count(V14_INSTALLED, "Flyway V14") != 1:
+            raise PreflightError("V14 AI workflow schema migration has not been applied")
+        if query_count(V14_WORKFLOW_TABLES, "workflow tables") != 3:
+            raise PreflightError("V14 AI workflow audit/step tables absent")
+        if query_count(V14_UNIQUE_MOVE, "unique workflow proposal") != 1:
+            raise PreflightError("V14 proposal uniqueness constraint missing")
+        counts["ai_workflow_schema"] = "VERIFIED"
         if health_base:
             health_check(health_base)
         counts["database_namespace_constraint"] = "VERIFIED"
