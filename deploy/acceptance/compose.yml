@@ -4,9 +4,8 @@ x-app-env: &app-env
   MYSQL_HOST: mysql
   MYSQL_PORT: 3306
   MYSQL_PASSWORD: m47-disposable-only
-  # The ephemeral MySQL server generates a self-signed certificate. Require TLS
-  # instead of enabling RSA public-key retrieval or weakening the auth plugin.
-  # This is isolated-only; real environments must verify their approved CA/identity.
+  # Isolated-only TLS for the ephemeral MySQL self-signed certificate.
+  # Real environments must verify their approved CA/identity.
   SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/cloudchunk?sslMode=REQUIRED&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
   REDIS_HOST: redis
   REDIS_PORT: 6379
@@ -57,12 +56,12 @@ services:
       retries: 40
       timeout: 3s
   namesrv:
-    image: apache/rocketmq:5.2.0
+    image: cloudchunk-m47-mq:${M47_IMAGE_TAG:?isolated image tag required}
     command: sh mqnamesrv
     environment:
       JAVA_OPT_EXT: '-Xms128m -Xmx128m -Xmn64m'
   broker:
-    image: apache/rocketmq:5.2.0
+    image: cloudchunk-m47-mq:${M47_IMAGE_TAG:?isolated image tag required}
     command: sh mqbroker -n namesrv:9876 -c /home/rocketmq/acceptance.conf
     depends_on: [namesrv]
     environment:

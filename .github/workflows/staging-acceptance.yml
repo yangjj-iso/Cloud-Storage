@@ -61,11 +61,8 @@ jobs:
           mkdir -p "$M47_REPORT_DIR"
           docker build --build-arg REVISION="$(git rev-parse HEAD)" \
             -f deploy/acceptance/Dockerfile.runtime -t "cloudchunk-m47:$M47_IMAGE_TAG" .
-      - name: Start only the disposable internal topology
-        run: |
-          docker compose -f deploy/acceptance/compose.yml config --quiet
-          docker compose -f deploy/acceptance/compose.yml pull mysql redis minio namesrv broker acceptance
-          docker compose -f deploy/acceptance/compose.yml up -d mysql redis minio namesrv broker api worker
+      - name: Probe broker runtime and start only the disposable internal topology
+        run: bash deploy/acceptance/start-isolated.sh
       - name: Upload actual bytes and await real queue consumers
         run: docker compose -f deploy/acceptance/compose.yml run --rm --no-deps acceptance
       - name: Bounded disposable-service diagnostics on failure
