@@ -206,6 +206,11 @@ def evaluate(phase, query_count, health_base=None, health_check=check_health):
             raise PreflightError("V16 recommendation feedback table missing")
         if query_count(V16_UNIQUE_PROPOSAL, "unique AI strategy proposal") != 1:
             raise PreflightError("V16 strategy feedback unique key missing")
+        if query_count(V17_INSTALLED, "Flyway V17") != 1:
+            raise PreflightError("V17 migration missing")
+        if query_count(V17_PRIVACY_TABLES, "privacy governance tables") != 2:
+            raise PreflightError("privacy tables missing")
+        counts["ai_privacy_governance_schema"] = "VERIFIED"
         counts["ai_strategy_feedback_schema"] = "VERIFIED"
         counts["organizing_strategy_schema"] = "VERIFIED"
         counts["ai_workflow_schema"] = "VERIFIED"
