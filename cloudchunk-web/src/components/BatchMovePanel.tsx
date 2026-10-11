@@ -162,7 +162,7 @@ export function BatchMovePanel({ results }: { results: SearchResult }) {
       </>}
       <label className="kw-consent"><input type="checkbox" checked={consent}
         disabled={busy || !selectedFiles.length || !selectedFolders.length} onChange={e => setConsent(e.target.checked)} />
-        <span>本次同意把已选文件的最多4个原文片段与候选目录名发送给模型，每个成功调用计入当天额度。只生成预览。</span></label>
+        <span>本次同意把已选文件的最多4个原文片段与候选目录名发送给模型。模型请求（包括失败请求）也会计入当天额度。只生成预览。</span></label>
       <button className="kw-button" type="button" onClick={generate}
         disabled={!consent || busy || !selectedFiles.length || !selectedFolders.length}>
         {busy ? '正在逐份生成建议…' : '生成批量预览（不执行）'}</button>
