@@ -1,4 +1,4 @@
-name: M4.5 reviewed feedback and consent lifecycle gates
+name: M4.6 product experience and release gates
 on:
   pull_request:
     branches: [main]
@@ -29,6 +29,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  product-acceptance:
+    uses: ./.github/workflows/product-acceptance.yml
+
   static-release:
     name: config and backup contract tests
     runs-on: ubuntu-latest
@@ -146,7 +149,7 @@ jobs:
   live-readonly:
     name: protected production read-only gate
     if: github.event_name == 'workflow_dispatch' && inputs.live_readonly
-    needs: [static-release, build-verification, docker-restore-drill]
+    needs: [static-release, build-verification, docker-restore-drill, product-acceptance]
     runs-on: [self-hosted, linux, x64, cloudchunk-release]
     timeout-minutes: 10
     environment: production
