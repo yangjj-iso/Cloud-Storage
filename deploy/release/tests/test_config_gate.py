@@ -46,6 +46,10 @@ receivers:
         for name in gate.REQUIRED_SERVICES:
             services[name] = {"image": "registry.example/cloud/" + name + "@sha256:" + "a" * 64}
         services["worker"]["image"] = services["api"]["image"]
+        services["api"]["environment"] = {
+            "OPS_PROMETHEUS_URL": "http://prometheus:9090",
+            "OPS_ALERTMANAGER_URL": "http://alertmanager:9093"
+        }
         services["web"]["ports"] = [{"host_ip": "127.0.0.1", "published": 8088, "target": 80}]
         return {"services": services}
 
@@ -113,6 +117,14 @@ receivers:
                 data["services"][name].update(update)
                 with self.assertRaises(gate.GateError):
                     gate.check_compose(data)
+
+    def test_operations_read_sources_must_not_be_public_or_missing(self):
+        for values in ({}, {"OPS_PROMETHEUS_URL": "https://external.example.com",
+                            "OPS_ALERTMANAGER_URL": "http://alertmanager:9093"}):
+            config = self.compose()
+            config["services"]["api"]["environment"] = values
+            with self.assertRaises(gate.GateError):
+                gate.check_compose(config)
 
     def test_compose_refuses_host_network(self):
         cfg = self.compose()

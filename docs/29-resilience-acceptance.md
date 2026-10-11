@@ -78,3 +78,6 @@ python3 -m unittest discover -s deploy/release/docker_tests -p 'test_alert_deliv
 ```
 
 原有的 `M3.5` 备份/恢复、`M3.6` 发布后只读检查与仅应用镜像回滚保护仍然保留。**没有通过的真实 CI 结果，不应当被写成已交付的演练成功结论。**
+
+
+M3.8 起可将演练输出与单次事件状态机审计关联；详见 [M3.8 运维闭环](./30-operations-slo-incident.md)。

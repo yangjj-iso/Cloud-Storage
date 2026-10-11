@@ -1,4 +1,4 @@
-name: M3.7 resilience release gates
+name: M3.8 SLO and incident release gates
 on:
   pull_request:
     branches: [main]
