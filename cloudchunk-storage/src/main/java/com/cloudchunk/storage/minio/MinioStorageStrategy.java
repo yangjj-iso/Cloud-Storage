@@ -48,10 +48,16 @@ public class MinioStorageStrategy implements StorageStrategy {
     private static final long MIN_MULTIPART_COMPOSE_SOURCE_SIZE = 5L * 1024 * 1024;
 
     private final MinioClient client;
+    private final MinioClient presignClient;
     private final StorageProperties properties;
 
     public MinioStorageStrategy(MinioClient client, StorageProperties properties) {
+        this(client, properties, client);
+    }
+
+    public MinioStorageStrategy(MinioClient client, StorageProperties properties, MinioClient presignClient) {
         this.client = client;
+        this.presignClient = presignClient;
         this.properties = properties;
         // 存储策略创建时先确保默认 bucket 存在。
         // 上传请求本身不负责建桶，避免每个分片上传都做一次 bucket 检查。
@@ -69,8 +75,20 @@ public class MinioStorageStrategy implements StorageStrategy {
             // 开发环境自动建桶可以减少首次启动后的手工准备步骤。
             boolean exists = client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
             if (!exists) {
-                client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
-                log.info("created minio bucket: {}", bucket);
+                try {
+                    client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+                    log.info("created minio bucket: {}", bucket);
+                } catch (io.minio.errors.ErrorResponseException race) {
+                    // API and Worker may both observe a missing bucket on first startup.
+                    // Accept only explicit same-owner success AND a fresh successful read.
+                    // AccessDenied, foreign ownership, transport errors and missing buckets still fail.
+                    if (race.errorResponse() == null
+                            || !"BucketAlreadyOwnedByYou".equals(race.errorResponse().code())
+                            || !client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build())) {
+                        throw race;
+                    }
+                    log.info("minio bucket initialized by a peer: {}", bucket);
+                }
             }
         } catch (Exception e) {
             throw new StorageException("ensureBucket failed: " + bucket, e);
@@ -253,7 +271,7 @@ public class MinioStorageStrategy implements StorageStrategy {
                     .build());
             StatObjectResponse stat = client.statObject(StatObjectArgs.builder()
                     .bucket(bucket).object(target).build());
-            return new ComposeResult(target, resp.etag(), stat.size());
+            return new ComposeResult(target, stat.etag(), stat.size());
         } catch (Exception e) {
             throw new StorageException(ErrorCode.COMPOSE_FAILED, "compose failed: " + target, e);
         }
@@ -263,7 +281,7 @@ public class MinioStorageStrategy implements StorageStrategy {
     public String presignDownload(String bucket, String objectKey, Duration ttl) {
         try {
             int seconds = (int) Math.min(ttl.toSeconds(), TimeUnit.DAYS.toSeconds(7));
-            return client.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+            return presignClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.GET)
                     .bucket(bucket)
                     .object(objectKey)
@@ -280,7 +298,7 @@ public class MinioStorageStrategy implements StorageStrategy {
             int seconds = (int) Math.min(ttl.toSeconds(), TimeUnit.DAYS.toSeconds(7));
             // 生成临时 PUT URL。前端拿到后可直接上传到 MinIO 的 objectKey。
             // 有效期受 MinIO 限制，这里最大不超过 7 天。
-            return client.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+            return presignClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.PUT)
                     .bucket(bucket)
                     .object(objectKey)

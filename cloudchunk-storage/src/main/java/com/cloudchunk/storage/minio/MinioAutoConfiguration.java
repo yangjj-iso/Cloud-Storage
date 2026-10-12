@@ -59,8 +59,15 @@ public class MinioAutoConfiguration {
                 .build();
     }
 
+    @Bean(destroyMethod = "close")
+    public MinioPresignClient minioPresignClient(StorageProperties props, MinioClient client,
+                                                OkHttpClient minioHttpClient) {
+        return MinioPresignClient.create(props, client, minioHttpClient);
+    }
+
     @Bean
-    public StorageStrategy minioStorageStrategy(MinioClient client, StorageProperties props) {
-        return new MinioStorageStrategy(client, props);
+    public StorageStrategy minioStorageStrategy(MinioClient client, StorageProperties props,
+                                                MinioPresignClient presigner) {
+        return new MinioStorageStrategy(client, props, presigner.client());
     }
 }

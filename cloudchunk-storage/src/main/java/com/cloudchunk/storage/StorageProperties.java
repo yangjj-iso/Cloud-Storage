@@ -17,6 +17,9 @@ public class StorageProperties {
 
     public static class Minio {
         private String endpoint = "http://localhost:9000";
+        // Blank preserves the existing endpoint. Never rewrite an already signed URL.
+        private String publicEndpoint = "";
+        private boolean publicEndpointAllowHttp = false;
         private String accessKey = "minioadmin";
         private String secretKey = "minioadmin";
         private String region = "cn-east-1";
@@ -24,6 +27,10 @@ public class StorageProperties {
 
         public String getEndpoint() { return endpoint; }
         public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+        public String getPublicEndpoint() { return publicEndpoint; }
+        public void setPublicEndpoint(String publicEndpoint) { this.publicEndpoint = publicEndpoint; }
+        public boolean isPublicEndpointAllowHttp() { return publicEndpointAllowHttp; }
+        public void setPublicEndpointAllowHttp(boolean allow) { this.publicEndpointAllowHttp = allow; }
         public String getAccessKey() { return accessKey; }
         public void setAccessKey(String accessKey) { this.accessKey = accessKey; }
         public String getSecretKey() { return secretKey; }
