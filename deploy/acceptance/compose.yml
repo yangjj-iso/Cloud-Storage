@@ -71,12 +71,19 @@ services:
       JAVA_OPT_EXT: '-Xms256m -Xmx256m -Xmn128m'
     volumes:
       - ./broker.conf:/home/rocketmq/acceptance.conf:ro
+    healthcheck:
+      test: ['CMD', 'java', '-Xms16m', '-Xmx64m', '-cp', '/opt/acceptance:/home/rocketmq/rocketmq-5.2.0/lib/*', 'BrokerReadinessProbe']
+      interval: 3s
+      timeout: 8s
+      start_period: 10s
+      retries: 30
   api:
     image: cloudchunk-m47:${M47_IMAGE_TAG:?isolated image tag required}
     depends_on:
       mysql: {condition: service_healthy}
       redis: {condition: service_healthy}
       minio: {condition: service_healthy}
+      broker: {condition: service_healthy}
     environment:
       <<: *app-env
       SPRING_PROFILES_ACTIVE: api,acceptance
@@ -89,7 +96,7 @@ services:
       mysql: {condition: service_healthy}
       redis: {condition: service_healthy}
       minio: {condition: service_healthy}
-      broker: {condition: service_started}
+      broker: {condition: service_healthy}
     restart: on-failure:3
     environment:
       <<: *app-env
