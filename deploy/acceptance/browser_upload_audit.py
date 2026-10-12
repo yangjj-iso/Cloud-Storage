@@ -26,11 +26,15 @@ class UploadAudit:
         self.storage_ids = set()
         self.credential_ids = set()
         self.extra_headers = {}  # Only booleans, never header values.
+        self.storage_methods = {}
+        self.response_status = {}
+        self.failure_details = []
 
     def cdp_request(self, event: dict):
         request, request_id = event["request"], event["requestId"]
         if storage_url(request["url"]):
             self.storage_ids.add(request_id)
+            self.storage_methods[request_id] = request["method"] if request["method"] in ("PUT", "OPTIONS") else "other"
             if request["method"] == "OPTIONS":
                 self.counts["preflights"] += 1
             if credential_header(request.get("headers", {})) or self.extra_headers.get(request_id, False):
@@ -43,11 +47,29 @@ class UploadAudit:
         if request_id in self.storage_ids and leaked:
             self.credential_ids.add(request_id)
 
+    def cdp_response(self, event: dict):
+        if event["requestId"] in self.storage_ids:
+            status = event.get("response", {}).get("status")
+            if type(status) in (int, float) and 100 <= status <= 599:
+                self.response_status[event["requestId"]] = int(status)
+
     def cdp_failed(self, event: dict):
         if event["requestId"] in self.storage_ids:
             error = event.get("corsErrorStatus", {}).get("corsError")
             key = "corsFailures" if error in CORS_DENIALS else "storageFailures"
             self.counts[key] += 1
+            # Fixed enums only: do not export raw errorText, headers, URLs or request IDs.
+            if len(self.failure_details) < 10:
+                network = event.get("errorText")
+                self.failure_details.append({
+                    "method": self.storage_methods.get(event["requestId"], "other"),
+                    "type": event.get("type") if event.get("type") in ("Preflight", "Fetch", "XHR") else "other",
+                    "responseStatus": self.response_status.get(event["requestId"], 0),
+                    "canceled": event.get("canceled") is True,
+                    "networkError": network if network in ("net::ERR_ABORTED", "net::ERR_FAILED",
+                        "net::ERR_CONNECTION_REFUSED", "net::ERR_NAME_NOT_RESOLVED") else "other",
+                    "corsError": error if error in CORS_DENIALS else "other",
+                })
 
     def on_request(self, request):
         if not request.url.startswith(self.base + "/api/v1/upload/"):

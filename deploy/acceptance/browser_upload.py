@@ -93,6 +93,7 @@ class BrowserJourney(Journey):
         cdp.send("Network.enable")
         cdp.on("Network.requestWillBeSent", audit.cdp_request)
         cdp.on("Network.requestWillBeSentExtraInfo", audit.cdp_extra)
+        cdp.on("Network.responseReceived", audit.cdp_response)
         cdp.on("Network.loadingFailed", audit.cdp_failed)
         self.page.on("request", audit.on_request)
         self.page.on("response", audit.on_response)
@@ -129,6 +130,7 @@ class BrowserJourney(Journey):
             self.page.remove_listener("response", audit.on_response)
             cdp.detach()
             self.report["browser"][lane] = audit.snapshot()
+            self.report["browser"].setdefault("networkDiagnostics", {})[lane] = audit.failure_details
 
 
 def main(argv=None):
