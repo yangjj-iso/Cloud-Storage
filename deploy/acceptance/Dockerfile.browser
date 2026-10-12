@@ -1,0 +1,12 @@
+# Test-only Chromium and dependencies; match the existing pinned Python package.
+FROM mcr.microsoft.com/playwright/python:v1.57.0-noble
+COPY deploy/acceptance/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+WORKDIR /work
+COPY deploy/acceptance/*.py /work/
+COPY cloudchunk-web/dist/ /dist/
+ARG REVISION
+RUN printf '%s' "$REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
+    printf '%s' "$REVISION" > /web-revision.txt
+# No host network, Docker socket, production credential or provider key.
+CMD ["python", "browser_upload.py", "--dist", "/dist", "--revision-file", "/web-revision.txt", "--report", "/reports/browser.json"]
