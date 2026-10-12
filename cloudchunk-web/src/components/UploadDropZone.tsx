@@ -19,7 +19,7 @@ export function UploadDropZone() {
       role="button"
       tabIndex={0}
       onClick={() => inputRef.current?.click()}
-      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click(); }}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); inputRef.current?.click(); } }}
       onDragOver={(event) => { event.preventDefault(); setActive(true); }}
       onDragLeave={() => setActive(false)}
       onDrop={onDrop}
@@ -41,7 +41,7 @@ export function UploadDropZone() {
         <Capability icon="fast_forward">并发上传</Capability>
         <Capability icon="play_pause">断点续传</Capability>
       </div>
-      <input ref={inputRef} className="hidden" type="file" multiple onChange={(event) => { if (event.target.files?.length) enqueue(event.target.files); event.target.value = ''; }} />
+      <input ref={inputRef} aria-label="选择上传文件" className="hidden" type="file" multiple onChange={(event) => { if (event.target.files?.length) enqueue(event.target.files); event.target.value = ''; }} />
     </div>
   );
 }

@@ -29,6 +29,7 @@ import io.minio.RemoveObjectsArgs;
 import io.minio.Result;
 import io.minio.StatObjectArgs;
 import io.minio.StatObjectResponse;
+import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
 import io.minio.messages.DeleteObject;
 import io.minio.messages.Item;
@@ -65,12 +66,21 @@ public class MinioStorageStrategy implements StorageStrategy {
 
     private void ensureBucket(String bucket) {
         try {
-            // MinIO 的 object 必须落在 bucket 下。
-            // 开发环境自动建桶可以减少首次启动后的手工准备步骤。
-            boolean exists = client.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
-            if (!exists) {
+            BucketExistsArgs probe = BucketExistsArgs.builder().bucket(bucket).build();
+            if (client.bucketExists(probe)) return;
+            try {
                 client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
                 log.info("created minio bucket: {}", bucket);
+            } catch (ErrorResponseException conflict) {
+                // API and Worker can both observe a missing bucket. Accept only
+                // same-owner creation plus a positive readback with this client.
+                // Never retry the write or swallow another owner's/permission failure.
+                if (conflict.errorResponse() == null
+                        || !"BucketAlreadyOwnedByYou".equals(conflict.errorResponse().code())
+                        || !client.bucketExists(probe)) {
+                    throw conflict;
+                }
+                log.debug("minio bucket concurrently initialized: {}", bucket);
             }
         } catch (Exception e) {
             throw new StorageException("ensureBucket failed: " + bucket, e);

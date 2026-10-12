@@ -1,0 +1,8 @@
+**
+!deploy
+!deploy/acceptance
+!deploy/acceptance/*.py
+!deploy/acceptance/requirements.txt
+!cloudchunk-web
+!cloudchunk-web/dist
+!cloudchunk-web/dist/**

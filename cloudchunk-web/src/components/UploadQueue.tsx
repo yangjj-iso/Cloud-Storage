@@ -8,7 +8,7 @@ export function UploadQueue() {
   const uploads = useAppStore((s) => s.uploads);
   const clearFinished = useAppStore((s) => s.clearFinished);
   return (
-    <section className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+    <section role="region" aria-label="上传任务" className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
       <div className="flex h-[60px] items-center justify-between border-b border-outline-variant bg-surface-bright px-lg">
         <h2 className="text-[18px] font-semibold text-on-background">上传任务</h2>
         <button type="button" onClick={clearFinished} className="rounded px-sm py-xs text-body-md font-medium text-on-surface-variant transition-colors hover:bg-surface-container hover:text-primary">清除已完成</button>
@@ -16,7 +16,10 @@ export function UploadQueue() {
       {uploads.length === 0 ? (
         <div className="flex min-h-[116px] items-center justify-center gap-sm px-md text-body-md text-outline"><MaterialIcon>cloud_queue</MaterialIcon>暂无上传任务</div>
       ) : (
-        <div className="divide-y divide-outline-variant">{uploads.map((task) => <TaskRow key={task.id} task={task} />)}</div>
+        <>
+          <div className="divide-y divide-outline-variant">{uploads.map((task) => <TaskRow key={task.id} task={task} />)}</div>
+          <p className="border-t border-outline-variant px-lg py-sm text-label-sm text-on-surface-variant">合并提交不代表整文件后台校验通过；可用状态请以文件列表为准。</p>
+        </>
       )}
     </section>
   );
@@ -36,7 +39,7 @@ function TaskRow({ task }: { task: UploadTask }) {
   const detail = task.status === 'UPLOADING'
     ? `${formatBytes(task.bytesTransferred)} / ${formatBytes(task.file.size)}${task.speed > 0 ? `  •  ${formatSpeed(task.speed)}` : ''}`
     : task.status === 'HASHING' ? formatBytes(task.file.size)
-    : task.status === 'DONE' ? `${formatBytes(task.file.size)}  •  MD5 校验通过`
+    : task.status === 'DONE' ? `${formatBytes(task.file.size)}  •  ${task.mode === 'INSTANT' ? '已复用现有可用文件' : '分片上传与合并已完成'}`
     : task.status === 'FAILED' ? task.error || formatBytes(task.file.size)
     : `${formatBytes(task.bytesTransferred)} / ${formatBytes(task.file.size)}`;
 
