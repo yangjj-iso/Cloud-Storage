@@ -1,12 +1,15 @@
 # Standalone disposable acceptance topology, never an overlay on deploy/docker-compose.yml.
 # No host ports, fixed container names, external volumes/networks, production credentials or model access.
 x-app-env: &app-env
+  TZ: UTC
+  JAVA_TOOL_OPTIONS: -Duser.timezone=UTC
   MYSQL_HOST: mysql
   MYSQL_PORT: 3306
   MYSQL_PASSWORD: m47-disposable-only
   # Isolated-only TLS for the ephemeral MySQL self-signed certificate.
   # Real environments must verify their approved CA/identity.
-  SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/cloudchunk?sslMode=REQUIRED&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
+  # Align JVM, JDBC and server/session time for DATETIME-based plan expiry.
+  SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/cloudchunk?sslMode=REQUIRED&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
   REDIS_HOST: redis
   REDIS_PORT: 6379
   RMQ_NAMESRV: namesrv:9876
@@ -30,7 +33,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: m47-disposable-only
       MYSQL_DATABASE: cloudchunk
-    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci', '--default-time-zone=+00:00']
     healthcheck:
       test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uroot', '-pm47-disposable-only']
       interval: 3s
