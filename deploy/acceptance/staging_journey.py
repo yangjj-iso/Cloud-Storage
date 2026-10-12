@@ -40,6 +40,10 @@ def require(value: object, code: str) -> None:
         raise AcceptanceError(code)
 
 
+def diagnostic_code(error: Exception) -> str:
+    return str(error) if isinstance(error, AcceptanceError) else "unexpected-runner-error"
+
+
 def origin(value: str, *, internal: bool = False) -> str:
     require(isinstance(value, str) and not re.search(r"[\s\\]", value), "invalid-origin")
     parsed = urlsplit(value)
@@ -142,7 +146,7 @@ class Client:
         except (URLError, OSError, TimeoutError):
             raise AcceptanceError("transport-error-no-write-retry") from None
 
-    def call(self, method: str, path: str, body: object = None, token: str = "", *, denied: bool | int = False):
+    def call(self, method: str, path: str, body: object = None, token: str = "", *, denied: bool | int = False, allow_empty: bool = False):
         data = None if body is None else json.dumps(body, allow_nan=False).encode()
         status, raw = self.raw(method, path, token=token, body=data)
         if not denied:
@@ -156,8 +160,11 @@ class Client:
             allowed = {(403, 100003), (404, 300001)} if type(denied) is bool else {(409, denied)}
             require((status, result["code"]) in allowed, "denial-not-proven")
             return None
-        require(result["code"] == 0 and "data" in result, "application-error")
-        return result["data"]
+        require(result["code"] == 0, "application-error")
+        # R<Void> deliberately omits null data. Only documented void endpoints
+        # opt in; missing data from reads/creation remains an acceptance failure.
+        require(allow_empty or result.get("data") is not None, "missing-response-data")
+        return result.get("data")
 
 
 def wait_for(read: Callable, ready: Callable, *, seconds: float = 120,
@@ -175,7 +182,8 @@ def wait_for(read: Callable, ready: Callable, *, seconds: float = 120,
 def evaluate(report: dict, config: Config) -> bool:
     expected = set(REQUIRED) | (set(MODEL_STAGES) if config.model else set())
     stages = report.get("stages", [])
-    require(report.get("schemaVersion") == 1 and report.get("mode") == config.mode
+    require(type(report.get("schemaVersion")) is int and report["schemaVersion"] == 1
+            and report.get("mode") == config.mode
             and report.get("commit") == config.revision and report.get("environment") == config.environment,
             "evidence-scope-mismatch")
     require(len(stages) == len(expected) and {s.get("name") for s in stages} == expected,
@@ -210,12 +218,16 @@ class Journey:
         try:
             yield
             item["passed"] = True
+        except Exception as error:
+            item["errorCode"] = diagnostic_code(error)
+            raise
         finally:
             item["durationMs"] = round((time.monotonic() - started) * 1000, 2)
 
-    def call(self, method: str, path: str, body: object = None, *, other: bool = False, denied: bool | int = False):
+    def call(self, method: str, path: str, body: object = None, *, other: bool = False,
+             denied: bool | int = False, allow_empty: bool = False):
         return self.client.call(method, "/api/v1" + path, body,
-                                self.other if other else self.token, denied=denied)
+                                self.other if other else self.token, denied=denied, allow_empty=allow_empty)
 
     def root(self):
         return self.call("GET", "/drive/list?parentId=0")
@@ -231,8 +243,16 @@ class Journey:
             auth = self.client.call("POST", "/api/v1/auth/login", {
                 "account": self.cfg.other_account if second else self.cfg.account,
                 "password": self.cfg.other_password if second else self.cfg.password})
-        require(auth.get("token") and str(auth["user"]["id"]).isdigit()
-                and auth["user"].get("role") != "ADMIN", "invalid-test-account")
+        # Keep an issued token available for logout even if role validation fails.
+        token = auth.get("token")
+        if isinstance(token, str):
+            if second:
+                self.other = token
+            else:
+                self.token = token
+        require(isinstance(token, str) and token and str(auth["user"]["id"]).isdigit()
+                and int(auth["user"]["id"]) > 0
+                and auth["user"].get("role") == "user", "invalid-test-account")
         return auth["token"], str(auth["user"]["id"])
 
     def upload(self, name: str, content: bytes, direct: bool) -> tuple[str, str]:
@@ -387,7 +407,7 @@ class Journey:
         with self.stage("cleanup"):
             if self.template:
                 try:
-                    self.call("POST", "/knowledge/organize/templates/" + self.template + "/archive", {"confirmed": True})
+                    self.call("POST", "/knowledge/organize/templates/" + self.template + "/archive", {"confirmed": True}, allow_empty=True)
                 except Exception:
                     failures += 1
             for uid, name, directory in sorted(self.entries, key=lambda x: x[2]):
@@ -401,7 +421,7 @@ class Journey:
                             and name.startswith(self.prefix), "cleanup-receipt-changed")
                     if directory:
                         require(self.call("GET", "/drive/list?parentId=" + uid) == [], "cleanup-directory-not-empty")
-                    self.call("DELETE", "/drive/" + uid)
+                    self.call("DELETE", "/drive/" + uid, allow_empty=True)
                 except Exception:
                     failures += 1
             # Missing receipts cannot be treated as successful cleanup.
@@ -410,7 +430,7 @@ class Journey:
             for token in (self.token, self.other):
                 if token:
                     try:
-                        self.client.call("POST", "/api/v1/auth/logout", token=token)
+                        self.client.call("POST", "/api/v1/auth/logout", token=token, allow_empty=True)
                     except Exception:
                         failures += 1
             self.report["cleanup"] = "complete" if failures == 0 else "incomplete"
@@ -432,13 +452,22 @@ def main(argv=None) -> int:
         report.update(mode=config.mode, commit=config.revision, environment=config.environment,
                       model="required" if config.model else "not-requested")
         journey = Journey(config, report)
+        primary_error = None
         try:
             journey.run()
-        finally:
+        except Exception as error:
+            primary_error = error
+        try:
             journey.cleanup()
+        except Exception as error:
+            report["cleanupErrorCode"] = diagnostic_code(error)
+            if primary_error is None:
+                primary_error = error
+        if primary_error is not None:
+            raise primary_error
         report["passed"] = evaluate(report, config)
     except Exception as error:
-        report["errorCode"] = str(error) if isinstance(error, AcceptanceError) else "unexpected-runner-error"
+        report["errorCode"] = diagnostic_code(error)
     finally:
         args.report.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     print("M4.7 acceptance " + ("PASS" if report["passed"] else "FAIL"))
