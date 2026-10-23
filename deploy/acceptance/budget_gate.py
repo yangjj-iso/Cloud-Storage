@@ -7,7 +7,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 REQUIRED_JOURNEYS = {'login', 'keyword-search', 'strategy-preview', 'approve-without-execute',
-                     'execute-single', 'cancel-preserves-move', 'reload-history', 'mobile-layout'}
+                     'execute-single', 'cancel-preserves-move', 'reload-history', 'mobile-layout', 'drive-folder-lifecycle'}
 LIMITS = {'initialJsGzipBytes': 250 * 1024, 'totalJsGzipBytes': 400 * 1024,
           'totalCssGzipBytes': 80 * 1024, 'keywordSearchP95Ms': 2000}
 

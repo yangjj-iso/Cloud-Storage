@@ -1,8 +1,14 @@
-# CloudChunk
+# CloudForge
 
-CloudChunk 是一个面向文件管理场景的 Java 服务，提供分片上传、断点续传、内容去重、对象存储下载、网盘目录、分享与配额管理。项目由 Spring Boot 后端和 React 前端组成；开发环境中的 MySQL、Redis、RocketMQ 与 MinIO 由 Docker Compose 提供。
+> 用户界面采用 CloudForge 品牌；内部模块与配置继续使用 `cloudchunk`，兼容已有部署。
+
+CloudForge 是一个面向文件管理场景的 Java 服务，提供分片上传、断点续传、内容去重、对象存储下载、网盘目录、分享与配额管理。项目由 Spring Boot 后端和 React 前端组成；开发环境中的 MySQL、Redis、RocketMQ 与 MinIO 由 Docker Compose 提供。
 
 > 本文只描述仓库当前可验证的实现。性能数字应以 [基准测试说明](./docs/08-benchmark-metrics.md) 中的脚本、环境与输出为准。
+
+![CloudForge 文件管理界面](./docs/screenshots/drive-desktop.png)
+
+*界面截图使用合成测试文件。更多界面与运行说明见 [CloudForge 产品体验](./docs/38-cloudforge-product-experience.md)。*
 
 ## 已实现能力
 
@@ -136,6 +142,8 @@ npm run dev
 | Prometheus | `http://localhost:9090` | 指标查询与抓取状态 |
 
 ## 文档导航
+
+- [CloudForge 界面与前端架构](./docs/38-cloudforge-product-experience.md)：目录浏览、移动、响应式界面与真实后端验收。
 
 - [文档中心](./docs/README.md)：阅读顺序、功能边界和验证入口。
 - [整体架构](./docs/00-architecture.md)：模块职责、依赖方向与运行时数据流。

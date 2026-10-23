@@ -1,213 +1,604 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { LayoutGrid, List, Search, X } from 'lucide-react';
 import { useAppStore } from '../store';
 import { formatBytes } from '../lib/utils';
 import { api, downloadUrl } from '../lib/api';
 import { downloadFile } from '../lib/download';
 import { MaterialIcon } from './ui/MaterialIcon';
+import { Dialog } from './ui/Dialog';
 import { formatZhDate } from '../lib/locale';
+import { useDriveBrowser } from '../features/drive/useDriveBrowser';
+import { FolderPicker } from '../features/drive/FolderPicker';
+import { fileKind, saveBlob } from '../features/drive/filePresentation';
+import type { UserFileItem } from '../types';
 
+type Action = { kind: 'mkdir' } | { kind: 'rename' | 'delete' | 'move'; file: UserFileItem } | null;
+type Share = { shareId: string; shareCode: string };
+const categories = [
+  { id: 'document', name: '文档', icon: 'description', color: 'blue' },
+  { id: 'image', name: '图片', icon: 'image', color: 'purple' },
+  { id: 'video', name: '视频', icon: 'movie', color: 'rose' },
+  { id: 'other', name: '其他文件', icon: 'folder_zip', color: 'mint' },
+];
 export function DriveView() {
-  const { driveFiles, driveParentId, driveLoading, refreshDrive, driveDelete, createShare, showToast, setView } = useAppStore();
-  const [showMkdir, setShowMkdir] = useState(false);
-  const [newDirName, setNewDirName] = useState('');
+  const browser = useDriveBrowser();
+  const { files, path, parentId, loading, error, refresh } = browser;
+  const setView = useAppStore((s) => s.setView);
+  const setActiveFile = useAppStore((s) => s.setActiveFile);
+  const showToast = useAppStore((s) => s.showToast);
+  const createShare = useAppStore((s) => s.createShare);
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('all');
+  const [layout, setLayout] = useState<'list' | 'grid'>('list');
+  const [sort, setSort] = useState('newest');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [menuId, setMenuId] = useState<number | null>(null);
-  const [renameId, setRenameId] = useState<number | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [shareResult, setShareResult] = useState<{ shareId: string; shareCode: string } | null>(null);
-  const [movingId, setMovingId] = useState<number | null>(null);
-  const [targetParentId, setTargetParentId] = useState('0');
-  const [auditOpen,setAuditOpen]=useState(false);
-  const [audits,setAudits]=useState<Array<{operation:string;success:boolean;costMs:number;at:string}>>([]);
-  const [auditError,setAuditError]=useState('');
-  const [renameError,setRenameError]=useState('');
-  const [mkdirError,setMkdirError]=useState('');
-  const [moveError,setMoveError]=useState('');
-  const [busyAction,setBusyAction]=useState(false);
-  const [auditBusy,setAuditBusy]=useState(false);
-  const loadAudit=async()=>{
-    setAuditBusy(true);setAuditError('');
-    try{setAudits(await api.driveAudit());}
-    catch(e){setAuditError(e instanceof Error?e.message:'操作记录读取失败');}
-    finally{setAuditBusy(false);}
+  const [action, setAction] = useState<Action>(null);
+  const [name, setName] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [share, setShare] = useState<Share | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [audits, setAudits] = useState<Awaited<ReturnType<typeof api.driveAudit>>>([]);
+  const [historyError, setHistoryError] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
+  useEffect(() => {
+    setSelected(new Set());
+    setSearch('');
+    setCategory('all');
+    setMenuId(null);
+  }, [parentId]);
+  useEffect(() => {
+    if (menuId === null) return;
+    const close = (event: MouseEvent) => {
+      if (!(event.target as Element).closest('.file-actions')) setMenuId(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuId(null);
+    };
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('click', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [menuId]);
+  const visible = useMemo(
+    () =>
+      files
+        .filter(
+          (file) =>
+            file.fileName.toLocaleLowerCase().includes(search.toLocaleLowerCase()) &&
+            (category === 'all' || fileKind(file.fileName, file.isDir).category === category),
+        )
+        .sort(
+          (a, b) =>
+            Number(b.isDir) - Number(a.isDir) ||
+            (sort === 'name'
+              ? a.fileName.localeCompare(b.fileName, 'zh-CN')
+              : sort === 'size'
+                ? b.fileSize - a.fileSize
+                : (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)),
+        ),
+    [files, search, category, sort],
+  );
+  const chosen = files.filter((file) => selected.has(file.id));
+  const toggle = (id: number) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const startAction = (next: Exclude<Action, null>) => {
+    setAction(next);
+    setName(next.kind === 'rename' ? next.file.fileName : '');
+    setActionError('');
+    setMenuId(null);
   };
-  const isConflict=(error:unknown)=>error instanceof Error && 'code' in error &&
-    (error as {code?:number}).code===300004;
-
-
-  useEffect(() => { void refreshDrive(0); }, [refreshDrive]);
-
-  const submitFolder = async () => {
-    if (!newDirName.trim()) return;
-    if(busyAction)return;
-    setBusyAction(true);setMkdirError('');
-    try{
-      await api.driveMkdir(driveParentId,newDirName.trim());
-      showToast({kind:'success',title:'目录已创建'});
-      await refreshDrive();
-      setNewDirName('');setShowMkdir(false);
-    }catch(e){
-      setMkdirError(isConflict(e)?'此目录已有同名文件或文件夹，请修改名称再试':
-        e instanceof Error?e.message:'创建失败');
-    }finally{setBusyAction(false);}
-  };
-
-  const onDownload = async (fileId: string, fileName: string, fileSize: number) => {
-    try { await downloadFile({ url: downloadUrl(fileId), fileName, fileSize }); }
-    catch (reason) { showToast({ kind: 'error', title: '下载失败', description: (reason as Error).message }); }
-  };
-
-  const downloadSelected = async () => {
-    if (!selected.size) return;
+  const finishAction = async () => {
+    if (!action || busy || action.kind === 'move') return;
+    if (action.kind !== 'delete' && !name.trim()) return;
+    setBusy(true);
+    setActionError('');
     try {
-      const blob = await api.driveDownloadZip([...selected]);
-      const anchor = document.createElement('a');
-      anchor.href = URL.createObjectURL(blob);
-      anchor.download = `CloudChunk-打包下载-${new Date().toISOString().slice(0, 10)}.zip`;
-      anchor.click();
-      URL.revokeObjectURL(anchor.href);
-    } catch (reason) { showToast({ kind: 'error', title: '打包下载失败', description: (reason as Error).message }); }
+      if (action.kind === 'mkdir') await api.driveMkdir(parentId, name.trim());
+      else if (action.kind === 'rename') await api.driveRename(action.file.id, name.trim());
+      else await api.driveDelete(action.file.id);
+      showToast({
+        kind: 'success',
+        title:
+          action.kind === 'mkdir' ? '文件夹已创建' : action.kind === 'rename' ? '已重命名' : '已移入回收站',
+      });
+      setAction(null);
+      setSelected(new Set());
+      refresh();
+      void useAppStore.getState().refreshQuota();
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : '操作失败');
+    } finally {
+      setBusy(false);
+    }
   };
-
-  const toggle = (id: number) => setSelected((current) => {
-    const next = new Set(current);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
-
+  const zip = async (items: UserFileItem[]) => {
+    if (!items.length || busy) return;
+    setBusy(true);
+    try {
+      saveBlob(
+        await api.driveDownloadZip(items.map((file) => file.id)),
+        `${items.length === 1 ? items[0].fileName : 'CloudForge-文件'}.zip`,
+      );
+    } catch (reason) {
+      showToast({
+        kind: 'error',
+        title: '打包失败',
+        description: reason instanceof Error ? reason.message : '',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const download = async (file: UserFileItem) => {
+    setMenuId(null);
+    try {
+      await downloadFile({ url: downloadUrl(file.fileId), fileName: file.fileName, fileSize: file.fileSize });
+    } catch (reason) {
+      showToast({
+        kind: 'error',
+        title: '下载失败',
+        description: reason instanceof Error ? reason.message : '',
+      });
+    }
+  };
+  const shareFile = async (file: UserFileItem) => {
+    setMenuId(null);
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await createShare(file.id, 7);
+      if (result) setShare(result);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const loadAudit = async () => {
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      setAudits(await api.driveAudit());
+    } catch (reason) {
+      setHistoryError(reason instanceof Error ? reason.message : '读取失败');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
   return (
-    <div className="w-full max-w-[1400px] p-margin-mobile md:p-margin-desktop">
-      <div className="mb-lg flex items-center justify-between">
-        <div className="flex items-center gap-md">
-          {driveParentId !== 0 && <button type="button" onClick={() => refreshDrive(0)} className="stitch-icon-button"><MaterialIcon>arrow_back</MaterialIcon></button>}
-          <h1 className="text-headline-lg text-on-surface">我的云盘</h1>
+    <div className="workspace-page drive-page">
+      <header className="page-heading">
+        <div>
+          <span className="eyebrow">MY WORKSPACE</span>
+          <h1>
+            我的云盘<span className="title-dot">.</span>
+          </h1>
+          <p>让每一份文件，都井然有序。</p>
         </div>
-        <div className="flex gap-md">
-          {selected.size > 0 && <button type="button" onClick={downloadSelected} className="flex h-10 items-center gap-sm rounded-lg border border-primary-fixed-dim bg-primary-fixed px-md text-label-md text-primary shadow-sm"><MaterialIcon className="text-[18px]">folder_zip</MaterialIcon>打包下载（{selected.size}）</button>}
-          <button type="button" onClick={() => {setMkdirError('');setShowMkdir(true);}} className="flex h-10 items-center gap-sm rounded-lg border border-outline-variant bg-surface-container-lowest px-md text-label-md text-on-surface shadow-sm transition-colors hover:bg-surface-container">
-            <MaterialIcon className="text-[18px]">create_new_folder</MaterialIcon>新建文件夹
+        <div className="heading-actions">
+          <button className="forge-button" onClick={() => startAction({ kind: 'mkdir' })}>
+            <MaterialIcon>create_new_folder</MaterialIcon>新建文件夹
           </button>
-          <button type="button" onClick={()=>{setAuditOpen(v=>!v);void loadAudit();}} className="flex h-10 items-center gap-sm rounded-lg border border-outline-variant px-md text-label-md"><MaterialIcon>history</MaterialIcon>操作记录</button>
-          <button type="button" onClick={() => setView('upload')} className="flex h-10 items-center gap-sm rounded-lg bg-primary px-md text-label-md text-on-primary shadow-sm transition-colors hover:bg-primary-container">
-            <MaterialIcon className="text-[18px]">upload</MaterialIcon>上传文件
+          <button className="forge-button primary" onClick={() => setView('upload')}>
+            <MaterialIcon>add</MaterialIcon>上传文件
           </button>
         </div>
-      </div>
-
-      {showMkdir && (
-        <div className="mb-md flex items-center gap-sm rounded-xl border border-outline-variant bg-white p-md shadow-sm">
-          <MaterialIcon className="text-secondary">create_new_folder</MaterialIcon>
-          <input autoFocus value={newDirName} onChange={(event) => setNewDirName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitFolder()} placeholder="请输入文件夹名称" className="stitch-focus h-9 min-w-0 flex-1 rounded border border-outline-variant px-sm text-body-md" />
-          <button type="button" disabled={busyAction} onClick={submitFolder} className="h-9 rounded bg-primary px-md text-label-md text-white">创建</button>
-          <button type="button" onClick={() => setShowMkdir(false)} className="h-9 rounded px-md text-label-md text-on-surface-variant hover:bg-surface-container">取消</button>
-          {mkdirError && <span role="alert" className="text-error text-label-sm">{mkdirError}</span>}
-        </div>
-      )}
-
-      {auditOpen && <section className="mb-md rounded-xl border border-outline-variant bg-white p-md">
-        <div className="mb-sm flex justify-between"><strong>最近 30 条网盘操作（仅当前账号）</strong>
-          <button type="button" disabled={auditBusy} onClick={()=>void loadAudit()}>刷新</button></div>
-        {auditError && <p role="alert" className="text-error">{auditError}</p>}
-        {auditBusy && <p>正在加载审计记录…</p>}
-        {!auditBusy && audits.length===0 && <p>暂无操作记录</p>}
-        <div className="max-h-44 overflow-y-auto">
-          {audits.map((a,i)=><div key={i} className="flex justify-between gap-sm border-b py-xs text-body-sm">
-            <span>{({DRIVE_MKDIR:'新建目录',DRIVE_RENAME:'重命名',DRIVE_MOVE:'移动',
-              DRIVE_RECYCLE:'移入回收站',DRIVE_RESTORE:'还原',DRIVE_PURGE:'彻底删除'} as Record<string,string>)[a.operation]||a.operation}
-              {' · '}{a.success?'成功':'失败'}</span><span>{a.at}</span>
-          </div>)}
-        </div>
-      </section>}
-      <section className="overflow-visible rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
-        <div className="grid grid-cols-12 gap-md rounded-t-xl border-b border-outline-variant bg-surface-container-low p-md text-label-md uppercase tracking-wider text-on-surface-variant">
-          <div className="col-span-6 flex items-center gap-md"><input aria-label="全选" type="checkbox" checked={driveFiles.length > 0 && selected.size === driveFiles.length} onChange={() => setSelected(selected.size === driveFiles.length ? new Set() : new Set(driveFiles.map((item) => item.id)))} className="h-4 w-4 rounded accent-primary" /><span>名称</span></div>
-          <div className="col-span-2 text-right">大小</div><div className="col-span-3">修改时间</div><div className="col-span-1 text-center">操作</div>
-        </div>
-
-        {driveLoading ? (
-          <div className="flex h-28 items-center justify-center text-body-md text-outline"><MaterialIcon className="mr-sm animate-spin">progress_activity</MaterialIcon>正在加载文件…</div>
-        ) : driveFiles.length === 0 ? (
-          <div className="flex h-32 flex-col items-center justify-center text-body-md text-outline"><MaterialIcon className="mb-sm text-[32px]">folder_open</MaterialIcon>此文件夹为空</div>
-        ) : (
-          <div>{driveFiles.map((file, index) => {
-            const isSelected = selected.has(file.id);
-            const appearance = fileAppearance(file.fileName, file.isDir);
-            return (
-              <div key={file.id} className={`group grid min-h-[66px] grid-cols-12 items-center gap-md p-md transition-colors ${index < driveFiles.length - 1 ? 'border-b border-outline-variant' : ''} ${isSelected ? 'bg-secondary-container/30' : 'hover:bg-surface-container-lowest/50'}`}>
-                <div className="col-span-6 flex min-w-0 items-center gap-md">
-                  <input aria-label={`选择 ${file.fileName}`} type="checkbox" checked={isSelected} onChange={() => toggle(file.id)} className="h-4 w-4 shrink-0 rounded accent-primary" />
-                  <MaterialIcon filled className={`shrink-0 ${appearance.color}`}>{appearance.icon}</MaterialIcon>
-                  {renameId === file.id ? (
-                    <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={() => setRenameId(null)} onKeyDown={async (event) => { if (event.key === 'Enter' && renameValue.trim()) {
-                      setRenameError('');
-                      try{await api.driveRename(file.id,renameValue.trim());setRenameId(null);void refreshDrive();}
-                      catch(e){setRenameError(isConflict(e)?'存在同名条目，请修改后重试':e instanceof Error?e.message:'重命名失败');}
-                    } }} className="stitch-focus h-8 min-w-0 flex-1 rounded border border-outline-variant px-sm text-body-md" />
-                  ) : (
-                    <button type="button" onDoubleClick={() => file.isDir && refreshDrive(file.id)} onClick={() => file.isDir && refreshDrive(file.id)} className="truncate text-left text-body-md font-medium text-on-surface hover:text-primary">{file.fileName}</button>
-                  )}
-                </div>
-                {renameId===file.id && renameError && <p role="alert" className="col-span-6 text-error text-label-sm">{renameError}</p>}
-                <div className="col-span-2 text-right text-body-md text-on-surface-variant">{file.isDir ? '--' : formatBytes(file.fileSize)}</div>
-                <div className="col-span-3 text-body-md text-on-surface-variant">{formatDriveDate(file.updatedAt || file.createdAt)}</div>
-                <div className="relative col-span-1 flex justify-center">
-                  <button type="button" onClick={() => setMenuId(menuId === file.id ? null : file.id)} className={`rounded-full p-xs text-on-surface-variant transition-all hover:bg-surface-container hover:text-primary ${isSelected || menuId === file.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}><MaterialIcon className="text-[20px]">more_vert</MaterialIcon></button>
-                  {menuId === file.id && (
-                    <div className="absolute right-2 top-8 z-20 w-36 rounded-xl border border-outline-variant bg-white p-xs text-body-md shadow-ambient">
-                      {!file.isDir && file.fileId && <MenuItem icon="download" label="下载" onClick={() => { setMenuId(null); onDownload(file.fileId!, file.fileName, file.fileSize); }} />}
-                      <MenuItem icon="folder_zip" label="打包下载" onClick={() => { setMenuId(null); setSelected(new Set([file.id])); void api.driveDownloadZip([file.id]).then((blob) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${file.fileName}.zip`; a.click(); URL.revokeObjectURL(a.href); }).catch((reason) => showToast({ kind: 'error', title: '打包下载失败', description: (reason as Error).message })); }} />
-                      <MenuItem icon="share" label="分享" onClick={async () => { setMenuId(null); const result = await createShare(file.id, 7); if (result) setShareResult(result); }} />
-                      <MenuItem icon="edit" label="重命名" onClick={() => { setRenameId(file.id); setRenameError(''); setRenameValue(file.fileName); setMenuId(null); }} />
-                      <MenuItem icon="drive_file_move" label="移动" onClick={() => { setMovingId(file.id); setTargetParentId('0');setMoveError(''); setMenuId(null); }} />
-                      <MenuItem danger icon="delete" label="移入回收站" onClick={() => { setMenuId(null); if (confirm(`确定将“${file.fileName}”移入回收站吗？`)) driveDelete(file.id); }} />
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}</div>
-        )}
+      </header>
+      <section className="drive-categories" aria-label="当前目录分类">
+        {categories.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => setCategory(category === item.id ? 'all' : item.id)}
+            aria-pressed={category === item.id}
+            className={`category-card ${item.color}`}
+          >
+            <span className="category-icon">
+              <MaterialIcon>{item.icon}</MaterialIcon>
+            </span>
+            <strong>{item.name}</strong>
+            <span>
+              {loading
+                ? '—'
+                : files.filter((file) => fileKind(file.fileName, file.isDir).category === item.id).length}
+              <small> 个文件</small>
+            </span>
+            <MaterialIcon>north_east</MaterialIcon>
+          </button>
+        ))}
       </section>
-
-      {shareResult && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-inverse-surface/30" onClick={() => setShareResult(null)}>
-          <div className="w-[420px] rounded-xl border border-outline-variant bg-white p-lg shadow-ambient" onClick={(event) => event.stopPropagation()}>
-            <h2 className="text-headline-md">分享链接已创建</h2>
-            <div className="mt-md space-y-sm text-body-md text-on-surface-variant"><p>分享编号：<code className="text-on-surface">{shareResult.shareId}</code></p><p>提取码：<code className="font-semibold text-primary">{shareResult.shareCode}</code></p><p className="break-all">{window.location.origin}/#/s/{shareResult.shareId}?code={encodeURIComponent(shareResult.shareCode)}</p></div>
-            <button type="button" onClick={async () => { await navigator.clipboard.writeText(`${window.location.origin}/#/s/${shareResult.shareId}?code=${encodeURIComponent(shareResult.shareCode)}`); showToast({ kind: 'success', title: '分享链接已复制' }); }} className="mt-lg h-10 w-full rounded border border-primary text-label-md text-primary">复制分享链接</button>
-            <button type="button" onClick={() => setShareResult(null)} className="mt-sm h-10 w-full rounded bg-primary text-label-md text-white">完成</button>
+      <div className="drive-section-heading">
+        <nav className="drive-breadcrumb" aria-label="文件夹路径">
+          {path.map((crumb, index) => (
+            <span key={crumb.id}>
+              {index > 0 && <MaterialIcon>chevron_right</MaterialIcon>}
+              <button
+                onClick={() => browser.backTo(index)}
+                aria-current={index === path.length - 1 ? 'location' : undefined}
+              >
+                {crumb.name}
+              </button>
+            </span>
+          ))}
+        </nav>
+        <span className="directory-count">当前目录 · {files.length} 项</span>
+      </div>
+      <section className="drive-panel" aria-label="文件管理">
+        <div className="drive-toolbar">
+          <label className="drive-search">
+            <Search size={16} />
+            <input
+              aria-label="搜索当前目录"
+              placeholder="搜索当前目录…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {search && (
+              <button type="button" aria-label="清除搜索" onClick={() => setSearch('')}>
+                <X size={14} />
+              </button>
+            )}
+          </label>
+          <div className="drive-toolbar-actions">
+            <select aria-label="排序方式" value={sort} onChange={(event) => setSort(event.target.value)}>
+              <option value="newest">最近修改</option>
+              <option value="name">名称排序</option>
+              <option value="size">文件大小</option>
+            </select>
+            <button
+              className="stitch-icon-button"
+              type="button"
+              aria-label="刷新目录"
+              disabled={loading}
+              onClick={refresh}
+            >
+              <MaterialIcon className={loading ? 'animate-spin' : ''}>refresh</MaterialIcon>
+            </button>
+            <span className="layout-switch">
+              <button
+                aria-label="列表视图"
+                aria-pressed={layout === 'list'}
+                onClick={() => setLayout('list')}
+              >
+                <List size={17} />
+              </button>
+              <button
+                aria-label="网格视图"
+                aria-pressed={layout === 'grid'}
+                onClick={() => setLayout('grid')}
+              >
+                <LayoutGrid size={16} />
+              </button>
+            </span>
           </div>
         </div>
+        {category !== 'all' && (
+          <div className="filter-strip">
+            <span>{categories.find((item) => item.id === category)?.name}</span>
+            <button onClick={() => setCategory('all')} aria-label="清除类型筛选">
+              <X size={13} />
+            </button>
+          </div>
+        )}
+        {chosen.length > 0 && (
+          <div className="selection-toolbar">
+            <span>已选择 {chosen.length} 项</span>
+            <button disabled={busy} onClick={() => void zip(chosen)}>
+              <MaterialIcon>folder_zip</MaterialIcon>
+              {busy ? '正在打包…' : '打包下载'}
+            </button>
+            <button onClick={() => setSelected(new Set())}>取消选择</button>
+          </div>
+        )}
+        {loading ? (
+          <div className="drive-skeleton" aria-label="正在加载文件" role="status">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i}>
+                <span />
+                <span />
+                <span />
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="drive-empty" role="alert">
+            <MaterialIcon>cloud</MaterialIcon>
+            <h2>暂时无法读取文件</h2>
+            <p>{error}</p>
+            <button className="forge-button" onClick={refresh}>
+              重试
+            </button>
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="drive-empty">
+            <span className="empty-folder">
+              <MaterialIcon>folder_open</MaterialIcon>
+            </span>
+            <h2>{search || category !== 'all' ? '没有匹配的文件' : '留一点空间，给新的灵感'}</h2>
+            <p>{search || category !== 'all' ? '试试其他名称或文件类型' : '上传文件，开始整理你的云盘'}</p>
+            <button
+              className="forge-button primary"
+              onClick={() => {
+                if (search || category !== 'all') {
+                  setSearch('');
+                  setCategory('all');
+                } else setView('upload');
+              }}
+            >
+              {search || category !== 'all' ? '清除筛选' : '上传第一份文件'}
+            </button>
+          </div>
+        ) : (
+          <div className={`drive-items ${layout}`}>
+            {layout === 'list' && (
+              <div className="file-table-heading">
+                <label>
+                  <input
+                    aria-label="全选"
+                    type="checkbox"
+                    checked={visible.length > 0 && visible.every((file) => selected.has(file.id))}
+                    onChange={(event) =>
+                      setSelected(event.target.checked ? new Set(visible.map((file) => file.id)) : new Set())
+                    }
+                  />
+                  <span>文件名称</span>
+                </label>
+                <span>大小</span>
+                <span>修改时间</span>
+                <span />
+              </div>
+            )}
+            {visible.map((file) => {
+              const kind = fileKind(file.fileName, file.isDir);
+              return (
+                <article key={file.id} className={`drive-file ${selected.has(file.id) ? 'selected' : ''}`}>
+                  <div className="file-name-cell">
+                    <input
+                      aria-label={`选择 ${file.fileName}`}
+                      type="checkbox"
+                      checked={selected.has(file.id)}
+                      onChange={() => toggle(file.id)}
+                    />
+                    <span className={`file-type-icon ${kind.color}`}>
+                      <MaterialIcon>{kind.icon}</MaterialIcon>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => (file.isDir ? browser.open(file) : setActiveFile(file.fileId))}
+                      title={file.fileName}
+                    >
+                      <strong>{file.fileName}</strong>
+                      <small>{kind.label}</small>
+                    </button>
+                  </div>
+                  <span className="file-size">{file.isDir ? '—' : formatBytes(file.fileSize)}</span>
+                  <time className="file-date">{formatZhDate(file.updatedAt || file.createdAt, true)}</time>
+                  <div className="file-actions">
+                    <button
+                      type="button"
+                      className="stitch-icon-button"
+                      aria-label={`操作 ${file.fileName}`}
+                      aria-expanded={menuId === file.id}
+                      onClick={() => setMenuId(menuId === file.id ? null : file.id)}
+                    >
+                      <MaterialIcon>more_vert</MaterialIcon>
+                    </button>
+                    {menuId === file.id && (
+                      <div className="file-menu">
+                        {!file.isDir && (
+                          <MenuItem icon="download" label="下载" onClick={() => void download(file)} />
+                        )}
+                        <MenuItem
+                          icon="folder_zip"
+                          label="打包下载"
+                          onClick={() => {
+                            setMenuId(null);
+                            void zip([file]);
+                          }}
+                        />
+                        <MenuItem icon="share" label="分享" onClick={() => void shareFile(file)} />
+                        <MenuItem
+                          icon="edit"
+                          label="重命名"
+                          onClick={() => startAction({ kind: 'rename', file })}
+                        />
+                        <MenuItem
+                          icon="drive_file_move"
+                          label="移动"
+                          onClick={() => startAction({ kind: 'move', file })}
+                        />
+                        <MenuItem
+                          icon="delete"
+                          label="移入回收站"
+                          danger
+                          onClick={() => startAction({ kind: 'delete', file })}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+        <footer className="drive-panel-footer">
+          <span>{loading ? '正在同步…' : `${visible.length} 个项目`}</span>
+          <button
+            onClick={() => {
+              setHistoryOpen(true);
+              void loadAudit();
+            }}
+          >
+            <MaterialIcon>history</MaterialIcon>操作记录
+          </button>
+        </footer>
+      </section>
+      {action && action.kind !== 'move' && (
+        <Dialog
+          title={action.kind === 'mkdir' ? '新建文件夹' : action.kind === 'rename' ? '重命名' : '移入回收站'}
+          onClose={() => {
+            if (!busy) setAction(null);
+          }}
+        >
+          {action.kind === 'delete' ? (
+            <p className="dialog-note">“{action.file.fileName}”将移入回收站，可随时还原。</p>
+          ) : (
+            <form
+              id="file-action-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void finishAction();
+              }}
+            >
+              <label>
+                {action.kind === 'mkdir' ? '文件夹名称' : '文件名称'}
+                <input
+                  className="forge-input"
+                  autoFocus
+                  value={name}
+                  maxLength={255}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+              </label>
+            </form>
+          )}
+          {actionError && (
+            <p role="alert" className="inline-error">
+              {actionError}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button className="forge-button" disabled={busy} onClick={() => setAction(null)}>
+              取消
+            </button>
+            <button
+              className={`forge-button ${action.kind === 'delete' ? 'danger' : 'primary'}`}
+              disabled={busy || (action.kind !== 'delete' && !name.trim())}
+              onClick={() => void finishAction()}
+            >
+              {busy
+                ? '请稍候…'
+                : action.kind === 'mkdir'
+                  ? '创建'
+                  : action.kind === 'rename'
+                    ? '保存'
+                    : '移入回收站'}
+            </button>
+          </div>
+        </Dialog>
       )}
-
-      {movingId !== null && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-inverse-surface/30" onClick={() => setMovingId(null)}>
-          <div className="w-[380px] rounded-xl border border-outline-variant bg-white p-lg shadow-ambient" onClick={(event) => event.stopPropagation()}>
-            <h2 className="text-headline-md">移动文件</h2><p className="mt-xs text-body-md text-on-surface-variant">请输入目标文件夹编号；输入 0 表示根目录。</p>
-            <label className="mt-lg block text-label-sm text-on-surface-variant">目标文件夹编号<input autoFocus type="number" min="0" value={targetParentId} onChange={(event) => setTargetParentId(event.target.value)} className="stitch-focus mt-xs h-10 w-full rounded border border-outline-variant px-sm text-body-md" /></label>
-            {moveError && <p role="alert" className="mt-sm text-error text-label-sm">{moveError}</p>}
-            <div className="mt-lg flex justify-end gap-sm"><button type="button" onClick={() => setMovingId(null)} className="h-10 rounded px-md text-label-md text-on-surface-variant">取消</button><button type="button" onClick={async () => {try{await api.driveMove(movingId,Math.max(0,Number(targetParentId)||0));setMovingId(null);void refreshDrive();}
-              catch(e){setMoveError(isConflict(e)?'目标目录存在同名文件或文件夹，请选择其他位置':e instanceof Error?e.message:'移动失败');}}} className="h-10 rounded bg-primary px-md text-label-md text-white">确认移动</button></div>
+      {action?.kind === 'move' && (
+        <FolderPicker
+          source={action.file}
+          onClose={() => setAction(null)}
+          onMoved={() => {
+            setAction(null);
+            setSelected(new Set());
+            refresh();
+            showToast({ kind: 'success', title: '已移动' });
+          }}
+        />
+      )}
+      {share && (
+        <Dialog title="分享已创建" onClose={() => setShare(null)}>
+          <p className="dialog-note">有效期 7 天</p>
+          <div className="share-copy-box">
+            <input
+              className="forge-input"
+              aria-label="分享链接"
+              readOnly
+              value={`${window.location.origin}/#/s/${share.shareId}?code=${encodeURIComponent(share.shareCode)}`}
+              onFocus={(event) => event.target.select()}
+            />
+            <span>
+              提取码 <strong>{share.shareCode}</strong>
+            </span>
           </div>
-        </div>
+          <div className="dialog-actions">
+            <button
+              className="forge-button primary"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(
+                    `${window.location.origin}/#/s/${share.shareId}?code=${encodeURIComponent(share.shareCode)}`,
+                  );
+                  showToast({ kind: 'success', title: '链接已复制' });
+                } catch {
+                  showToast({ kind: 'info', title: '请选中上方链接复制' });
+                }
+              }}
+            >
+              复制链接
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {historyOpen && (
+        <Dialog title="操作记录" onClose={() => setHistoryOpen(false)}>
+          {historyLoading ? (
+            <p className="dialog-note" role="status">
+              正在读取…
+            </p>
+          ) : historyError ? (
+            <p className="inline-error" role="alert">
+              {historyError}
+            </p>
+          ) : audits.length === 0 ? (
+            <p className="dialog-note">暂无操作记录</p>
+          ) : (
+            <div className="drive-audit-list">
+              {audits.map((entry, index) => (
+                <div key={index}>
+                  <span>
+                    {(
+                      {
+                        DRIVE_MKDIR: '新建文件夹',
+                        DRIVE_RENAME: '重命名',
+                        DRIVE_MOVE: '移动',
+                        DRIVE_RECYCLE: '移入回收站',
+                        DRIVE_RESTORE: '还原',
+                        DRIVE_PURGE: '彻底删除',
+                      } as Record<string, string>
+                    )[entry.operation] || '文件操作'}
+                    <small>{entry.success ? '成功' : '失败'}</small>
+                  </span>
+                  <time>{formatZhDate(entry.at, true)}</time>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="dialog-actions">
+            <button className="forge-button" disabled={historyLoading} onClick={() => void loadAudit()}>
+              刷新
+            </button>
+          </div>
+        </Dialog>
       )}
     </div>
   );
 }
-
-function MenuItem({ icon, label, onClick, danger = false }: { icon: string; label: string; onClick: () => void; danger?: boolean }) {
-  return <button type="button" onClick={onClick} className={`flex w-full items-center gap-sm rounded-lg px-sm py-sm text-left hover:bg-surface-container ${danger ? 'text-error' : 'text-on-surface-variant'}`}><MaterialIcon className="text-[17px]">{icon}</MaterialIcon>{label}</button>;
-}
-
-function fileAppearance(name: string, isDir: boolean) {
-  if (isDir) return { icon: 'folder', color: 'text-secondary' };
-  const extension = name.split('.').pop()?.toLowerCase();
-  if (extension === 'pdf') return { icon: 'picture_as_pdf', color: 'text-error' };
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension || '')) return { icon: 'image', color: 'text-primary' };
-  if (['csv', 'xls', 'xlsx'].includes(extension || '')) return { icon: 'table_chart', color: 'text-tertiary-container' };
-  return { icon: 'draft', color: 'text-secondary' };
-}
-
-function formatDriveDate(value: string) {
-  return formatZhDate(value, true);
+function MenuItem({
+  icon,
+  label,
+  onClick,
+  danger = false,
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button type="button" onClick={onClick} className={danger ? 'danger' : ''}>
+      <MaterialIcon>{icon}</MaterialIcon>
+      {label}
+    </button>
+  );
 }

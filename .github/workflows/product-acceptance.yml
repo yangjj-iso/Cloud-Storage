@@ -50,6 +50,8 @@ jobs:
       - name: Browser contracts with explicit synthetic API responses
         id: contracts
         run: python3 deploy/acceptance/browser_contract.py --dist cloudchunk-web/dist --report artifacts/m46/contract.json
+      - name: File manager browser contracts and responsive screenshots
+        run: python3 deploy/acceptance/browser_drive.py --dist cloudchunk-web/dist --report artifacts/m46/drive-contract.json --screenshots artifacts/m46/screenshots
       - name: Real HTTP and browser journeys with isolated MySQL and Redis
         if: ${{ !cancelled() && steps.contracts.outcome != 'skipped' }}
         run: >-
