@@ -1,16 +1,27 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { PageBoundary } from './components/PageBoundary';
 import { Sidebar } from './components/Sidebar';
-import { AiHub } from './components/AiHub';
+const AiHub = lazy(() => import('./components/AiHub').then((module) => ({ default: module.AiHub })));
 import { Topbar } from './components/Topbar';
 import { QuotaWidget } from './components/QuotaWidget';
 import { UploadDropZone } from './components/UploadDropZone';
 import { UploadQueue } from './components/UploadQueue';
-import { FilesView } from './components/FilesView';
+const FilesView = lazy(() =>
+  import('./components/FilesView').then((module) => ({ default: module.FilesView })),
+);
 import { FileDrawer } from './components/FileDrawer';
-import { DriveView } from './components/DriveView';
-import { RecycleBin } from './components/RecycleBin';
-import { ShareList } from './components/ShareList';
-import { AdminPanel } from './components/AdminPanel';
+const DriveView = lazy(() =>
+  import('./components/DriveView').then((module) => ({ default: module.DriveView })),
+);
+const RecycleBin = lazy(() =>
+  import('./components/RecycleBin').then((module) => ({ default: module.RecycleBin })),
+);
+const ShareList = lazy(() =>
+  import('./components/ShareList').then((module) => ({ default: module.ShareList })),
+);
+const AdminPanel = lazy(() =>
+  import('./components/AdminPanel').then((module) => ({ default: module.AdminPanel })),
+);
 import { Toaster } from './components/ui/Toaster';
 import { MaterialIcon } from './components/ui/MaterialIcon';
 import { useAppStore } from './store';
@@ -46,7 +57,8 @@ function AuthenticatedApp() {
   }, [initAuth]);
 
   useEffect(() => {
-    const onUnauthorized = () => useAppStore.setState({ authUser: null, quota: null, files: [], uploads: [], activeFileId: null });
+    const onUnauthorized = () =>
+      useAppStore.setState({ authUser: null, quota: null, files: [], uploads: [], activeFileId: null });
     window.addEventListener('cloudchunk:unauthorized', onUnauthorized);
     return () => window.removeEventListener('cloudchunk:unauthorized', onUnauthorized);
   }, []);
@@ -66,7 +78,7 @@ function AuthenticatedApp() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setView('ai');
-        setAiFocusTick(v => v + 1);
+        setAiFocusTick((v) => v + 1);
       }
     };
     window.addEventListener('keydown', onShortcut);
@@ -74,79 +86,90 @@ function AuthenticatedApp() {
   }, [authUser, setView]);
 
   if (!authChecked) {
-    return <div className="flex h-full items-center justify-center bg-background text-body-md text-on-surface-variant"><MaterialIcon className="mr-sm animate-pulse text-primary">cloud_sync</MaterialIcon>正在连接 CloudChunk…</div>;
+    return (
+      <div className="flex h-full items-center justify-center bg-background text-body-md text-on-surface-variant">
+        <MaterialIcon className="mr-sm animate-pulse text-primary">cloud_sync</MaterialIcon>正在连接
+        CloudForge…
+      </div>
+    );
   }
 
-  if (!authUser) return <><LoginPage /><Toaster /></>;
+  if (!authUser)
+    return (
+      <>
+        <LoginPage />
+        <Toaster />
+      </>
+    );
 
   return (
-    <div className="h-screen overflow-hidden bg-background text-on-background">
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        跳到内容
+      </a>
       <Sidebar />
-      <div className="h-screen md:ml-[260px]">
-        <div className="sticky top-0 z-30 flex gap-xs overflow-x-auto border-b border-outline-variant bg-surface p-sm md:hidden" aria-label="移动端页面导航">
-          {([['ai','AI 工作台','auto_awesome'],['upload','上传','cloud_upload'],['drive','云盘','folder'],['files','文件','description'],['shares','分享','share'],['recycle','回收站','delete']] as const).map(([target,label,icon]) => (
-            <button key={target} type="button" onClick={() => setView(target)}
-              aria-current={view === target ? 'page' : undefined}
-              className={`flex min-w-[76px] flex-none items-center justify-center gap-1 rounded-lg px-sm py-sm text-label-sm ${view === target ? 'bg-primary-container font-bold text-on-primary-container' : 'text-on-surface-variant'}`}>
-              <MaterialIcon className="text-[18px]">{icon}</MaterialIcon>{label}
-            </button>
-          ))}
-          {authUser.role === 'admin' && (
-            <button type="button" onClick={() => setView('admin')}
-              aria-current={view === 'admin' ? 'page' : undefined}
-              className={`flex min-w-[76px] flex-none items-center justify-center gap-1 rounded-lg px-sm py-sm text-label-sm ${view === 'admin' ? 'bg-primary-container font-bold text-on-primary-container' : 'text-on-surface-variant'}`}>
-              <MaterialIcon className="text-[18px]">admin_panel_settings</MaterialIcon>管理
-            </button>
-          )}
-        </div>
-        <Topbar />
-        <main className="h-screen overflow-y-auto pt-0 md:h-[calc(100vh-64px)] md:pt-0 md:mt-16">
-          {view === 'ai' && <AiHub focusTick={aiFocusTick} />}
-          {view === 'upload' && (
-            <div className="p-lg lg:p-xl">
-              <div className="mb-lg">
-                <h1 className="text-headline-lg text-on-surface">上传中心</h1>
-                <p className="mt-xs text-body-md text-on-surface-variant">拖放文件并实时管理上传任务。完成完整性校验后，可在 AI 工作台建立可检索资料。</p>
-                <button type="button" className="mt-md inline-flex items-center gap-sm rounded-lg border border-primary-fixed-dim bg-primary-fixed px-md py-sm text-label-md text-primary" onClick={() => setView('ai')}>
-                  <MaterialIcon>auto_awesome</MaterialIcon>前往 AI 智能工作台 <MaterialIcon>arrow_forward</MaterialIcon>
-                </button>
-              </div>
-              <div className="grid grid-cols-1 items-start gap-lg lg:grid-cols-12">
-                <div className="space-y-lg lg:col-span-8">
-                  <UploadDropZone />
-                  <UploadQueue />
+      <div className="app-body">
+        <Topbar
+          onSearch={() => {
+            setView('ai');
+            setAiFocusTick((value) => value + 1);
+          }}
+        />
+        <main id="main-content" className="app-main" tabIndex={-1}>
+          <PageBoundary key={view}>
+            <Suspense
+              fallback={
+                <div className="page-fallback" role="status">
+                  <MaterialIcon className="animate-spin">progress_activity</MaterialIcon>正在加载…
                 </div>
-                <aside className="space-y-lg lg:col-span-4">
-                  <QuotaWidget />
-                  <UploadTip />
-                </aside>
-              </div>
-            </div>
-          )}
-          {view === 'files' && <FilesView />}
-          {view === 'drive' && <DriveView />}
-          {view === 'recycle' && <RecycleBin />}
-          {view === 'shares' && <ShareList />}
-          {view === 'admin' && <AdminPanel />}
+              }
+            >
+              {view === 'ai' && <AiHub focusTick={aiFocusTick} />}
+              {view === 'upload' && (
+                <div className="workspace-page upload-page">
+                  <div className="page-heading">
+                    <div>
+                      <span className="eyebrow">TRANSFER</span>
+                      <h1>上传中心</h1>
+                      <p>把重要的文件，放在一起。</p>
+                    </div>
+                    <button type="button" className="forge-button" onClick={() => setView('drive')}>
+                      <MaterialIcon>folder_open</MaterialIcon>打开云盘
+                      <MaterialIcon>arrow_upward</MaterialIcon>
+                    </button>
+                  </div>
+                  <div className="upload-layout">
+                    <div className="upload-primary">
+                      <UploadDropZone />
+                      <UploadQueue />
+                    </div>
+                    <aside className="upload-aside">
+                      <QuotaWidget />
+                      <section className="upload-ai-card">
+                        <span className="upload-ai-icon">
+                          <MaterialIcon>auto_awesome</MaterialIcon>
+                        </span>
+                        <h2>让文件，成为知识。</h2>
+                        <p>从你的文档中搜索、提问。</p>
+                        <button type="button" onClick={() => setView('ai')} aria-label="前往 AI 智能工作台">
+                          前往 AI 智能工作台 <MaterialIcon>arrow_forward</MaterialIcon>
+                        </button>
+                      </section>
+                    </aside>
+                  </div>
+                </div>
+              )}
+              {view === 'files' && <FilesView />}
+              {view === 'drive' && <DriveView />}
+              {view === 'recycle' && <RecycleBin />}
+              {view === 'shares' && <ShareList />}
+              {view === 'admin' && <AdminPanel />}
+            </Suspense>
+          </PageBoundary>
         </main>
       </div>
       <FileDrawer />
       <Toaster />
     </div>
-  );
-}
-
-function UploadTip() {
-  return (
-    <section className="rounded-xl border border-primary-fixed-dim bg-primary-fixed/45 p-lg text-on-surface">
-      <div className="flex items-start gap-md">
-        <MaterialIcon className="mt-xs text-primary">lightbulb</MaterialIcon>
-        <div>
-          <h3 className="text-body-md font-semibold">上传提示：智能并发</h3>
-          <p className="mt-sm text-body-md leading-5 text-on-surface-variant">CloudChunk 会自动切分大文件并并发上传，充分利用网络带宽，无需提前压缩文件。</p>
-          <span className="mt-md inline-flex items-center gap-xs text-label-md text-primary">支持秒传、断点续传与完整性校验 <MaterialIcon className="text-[17px]">verified</MaterialIcon></span>
-        </div>
-      </div>
-    </section>
   );
 }
