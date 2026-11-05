@@ -240,6 +240,9 @@ export async function runUpload(task: UploadTask, cb: UploadCallbacks): Promise<
               signal: abortSignal,
             });
             if (!putRes.ok) throw new Error(`MinIO PUT ${putRes.status}`);
+            // fetch resolves at the response headers. Finish reading the PUT response
+            // before confirming the chunk so a truncated transfer cannot count as done.
+            await putRes.arrayBuffer();
             await api.confirmChunk(init.fileId, idx, chunkMd5, abortSignal);
           } else {
             await api.uploadChunk(

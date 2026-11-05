@@ -53,6 +53,9 @@ services:
     environment:
       MINIO_ROOT_USER: m47-disposable
       MINIO_ROOT_PASSWORD: m47-disposable-secret-only
+      # M4.8: these are browser-container loopback origins, not published host ports.
+      # Port 8766 is deliberately NOT allowed. No production CORS configuration is changed.
+      MINIO_API_CORS_ALLOW_ORIGIN: http://127.0.0.1:8765
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
       interval: 3s
@@ -116,6 +119,20 @@ services:
       M47_EXPECTED_SHA: ${M47_EXPECTED_SHA:?revision required}
       M47_ENVIRONMENT: ${M47_ENVIRONMENT:?environment required}
     command: ['sh', '-c', 'python wait_api.py && python staging_journey.py --report /reports/isolated.json']
+  browser:
+    image: cloudchunk-m48-browser:${M47_IMAGE_TAG:?isolated image tag required}
+    profiles: [browser]
+    init: true
+    shm_size: 512mb
+    volumes:
+      - ${M47_REPORT_DIR:?report directory required}:/reports
+    environment:
+      M47_MODE: isolated
+      M47_API_ORIGIN: http://api:8080
+      M47_STORAGE_ORIGIN: http://minio:9000
+      M47_EXPECTED_SHA: ${M47_EXPECTED_SHA:?revision required}
+      M47_ENVIRONMENT: ${M47_ENVIRONMENT:?environment required}
+      M47_MODEL: 'false'
 
 networks:
   default:

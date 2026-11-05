@@ -1,4 +1,4 @@
-name: M4.7 upload-worker and staging acceptance
+name: M4.7 worker, M4.8 browser and staging acceptance
 on:
   workflow_call:
   workflow_dispatch:
@@ -51,20 +51,42 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Invalidate browser evidence before builds or service startup
+        run: >-
+          python3 deploy/acceptance/browser_upload_gate.py --initialize
+          --report "$M47_REPORT_DIR/browser.json" --sha "$(git rev-parse HEAD)"
+          --environment "$M47_ENVIRONMENT"
       - name: Test acceptance safety contracts
         run: python3 -m unittest discover -s deploy/acceptance/tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudchunk-web/package-lock.json
+      - name: Build the real upload UI and run its unit tests
+        working-directory: cloudchunk-web
+        run: npm ci && npm test && npm run build
       - name: Build the candidate without skipping unit tests
         run: mvn -B -pl cloudchunk-boot -am package
-      - name: Bind the packaged candidate and report to the actual checkout
+      - name: Bind the packaged candidate and browser build to the actual checkout
         run: |
           echo "M47_EXPECTED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           mkdir -p "$M47_REPORT_DIR"
           docker build --build-arg REVISION="$(git rev-parse HEAD)" \
             -f deploy/acceptance/Dockerfile.runtime -t "cloudchunk-m47:$M47_IMAGE_TAG" .
+          docker build --build-arg REVISION="$(git rev-parse HEAD)" \
+            -f deploy/acceptance/Dockerfile.browser -t "cloudchunk-m48-browser:$M47_IMAGE_TAG" .
       - name: Probe broker runtime and start only the disposable internal topology
         run: bash deploy/acceptance/start-isolated.sh
       - name: Upload actual bytes and await real queue consumers
         run: docker compose -f deploy/acceptance/compose.yml run --rm --no-deps acceptance
+      - name: Real Chromium file-input upload, CORS denial and proxy fallback
+        run: docker compose -f deploy/acceptance/compose.yml run --rm --no-deps browser
+      - name: Reject browser path substitution, credential leaks and missing worker evidence
+        run: >-
+          python3 deploy/acceptance/browser_upload_gate.py
+          --report "$M47_REPORT_DIR/browser.json" --sha "$M47_EXPECTED_SHA"
+          --environment "$M47_ENVIRONMENT"
       - name: Bounded disposable-service diagnostics on failure
         if: failure()
         run: bash deploy/acceptance/diagnostics.sh
@@ -78,7 +100,7 @@ jobs:
         with:
           name: m47-isolated-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/m47/*.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
 
   staging:
