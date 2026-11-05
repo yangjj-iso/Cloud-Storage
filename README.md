@@ -162,6 +162,20 @@ npm run dev
 - [AI 批量预览与条件撤销 M3.1](./docs/22-ai-batch-preview-and-undo.md)：最多四份文件批量建议、逐条批准与15分钟条件撤销。
 - [统一目录命名 M3.2](./docs/23-drive-sibling-name-invariants.md)：MySQL 活跃文件名唯一约束、冲突反馈、上传及转存重名后缀、并发回归。
 - [M3.3 文件操作审计与冲突体验](./docs/24-drive-audit-and-conflict-ui.md)：用户级操作记录、冲突后继续编辑及真实数据库测试。
+- [网盘冲突与操作审计 M3.3](./docs/24-drive-audit-conflict-ui.md)：用户级操作记录、固定审计分类和冲突提示。
+- [M3.4 上线预检与验收](./docs/25-release-preflight-and-acceptance.md)：只读历史重名/Flyway/健康检查、真实迁移阻断回归和隔离账号端到端验收。
+- [M3.5 正式发布准备](./docs/26-release-readiness.md)：生产配置门禁、不可变镜像、协调备份/隔离恢复演练及回滚 SOP。
+- [M3.6 生产稳定性 P0](./docs/27-production-stability.md)：私有令牌监控、告警规则、发布后自动验收与受控镜像回滚。
+- [M3.6 P1 依赖健康与故障回归](./docs/28-dependency-resilience.md)：只读管理员依赖状态、模拟故障与安全降级验收。
+- [M3.7 生产韧性验收](./docs/29-resilience-acceptance.md)：隔离 Docker 故障演练、Alertmanager 告警路由与审计证据。
+- [M3.8 SLO 与故障处置闭环](./docs/30-operations-slo-incident.md)：管理员只读 SLO、活动告警、审计式事件生命周期与复盘清单。
+- [M3.9 业务 SLI 与自动复盘草稿](./docs/31-business-sli-postmortem.md)：上传合并、下载流、异步终态、AI 降级指标及证据式复盘。
+- [M4.0 AI-Native 智能工作台](./docs/32-ai-native-workspace.md)：独立 AI 入口、全局快捷检索、受控批量索引、引用复核及研究摘录导出。
+- [M4.1 多步骤 Agent 工作流](./docs/33-reviewed-agent-workflows.md)：持久化移动计划、顺序审批、单项执行、撤销与事务审计。
+- [M4.2 智能整理策略与冲突模拟](./docs/34-organizing-templates.md)：保存文件类型规则、只读冲突预览、逐项审批执行与 Flyway V15 安全门禁。
+- [M4.3 AI 策略推荐与反馈闭环](./docs/35-ai-strategy-feedback.md)：一次性授权模型推荐已保存的规则，私有反馈分类、30 日统计和 Flyway V16 门禁。
+- [M4.4 推荐质量与隐私治理](./docs/36-ai-quality-privacy-governance.md)：合成离线质量评测、模型授权元数据记录与受控保留期处理。
+- [M4.5 AI 授权与反馈复核](./docs/37-ai-consent-review-benchmark.md)：版本化评测、后续推荐权限开关、分类反馈人工复核、V18 迁移。
 
 ## 验证
 

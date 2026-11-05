@@ -93,11 +93,12 @@ public class OutboxPublisher {
                 failed.increment();
                 int attempt = row.getAttemptCount() == null ? 1 : row.getAttemptCount() + 1;
                 long delay = Math.min(3600, 5L << Math.min(attempt, 9));
-                String error = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                mapper.markRetry(row.getId(), workerId, LocalDateTime.now().plusSeconds(delay),
-                        error.substring(0, Math.min(error.length(), 1024)));
-                log.warn("outbox publish failed: eventId={}, destination={}, attempt={}",
-                        row.getEventId(), row.getDestination(), attempt, e);
+                // Never persist/log broker exception messages: they may embed URLs or credentials.
+                // The original event stays in the outbox for durable retry.
+                String category = e instanceof IllegalArgumentException ? "EVENT_INVALID" : "SEND_FAILED";
+                mapper.markRetry(row.getId(), workerId, LocalDateTime.now().plusSeconds(delay), category);
+                log.warn("outbox publish retry scheduled: type={}, attempt={}",
+                        category, attempt);
             }
         }
     }

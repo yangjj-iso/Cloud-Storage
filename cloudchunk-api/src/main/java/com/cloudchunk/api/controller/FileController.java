@@ -6,6 +6,8 @@ import com.cloudchunk.common.exception.BizException;
 import com.cloudchunk.common.exception.ErrorCode;
 import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.download.service.DownloadService;
+import com.cloudchunk.api.monitoring.BusinessSliMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.cloudchunk.core.file.dto.FileView;
 import com.cloudchunk.core.file.service.FileApplicationService;
 import org.springframework.http.HttpHeaders;
@@ -32,6 +34,7 @@ import java.util.Map;
 public class FileController {
 
     private final FileApplicationService fileService;
+    @Autowired(required = false) private BusinessSliMetrics businessSli;
 
     public FileController(FileApplicationService fileService) { this.fileService = fileService; }
 
@@ -129,6 +132,7 @@ public class FileController {
         // StreamingResponseBody：写操作可在 Tomcat 异步 IO 线程执行，
         // 不阻塞 Servlet handler 线程（虚拟线程已大幅缓解，但释放越早越好）。
         StreamingResponseBody body = outputStream -> {
+            boolean complete = false;
             try (InputStream in = ds.stream()) {
                 byte[] buf = new byte[256 * 1024]; // 256KB buffer
                 int n;
@@ -136,6 +140,13 @@ public class FileController {
                     outputStream.write(buf, 0, n);
                 }
                 outputStream.flush();
+                complete = true;
+            } finally {
+                // Only mark completed after the actual streaming body is flushed.
+                // A 200/206 header alone is not proof that bytes were delivered.
+                if (businessSli != null) {
+                    businessSli.operation("download_stream", complete ? "completed" : "failed");
+                }
             }
         };
 

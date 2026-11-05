@@ -1,0 +1,122 @@
+# Standalone disposable acceptance topology, never an overlay on deploy/docker-compose.yml.
+# No host ports, fixed container names, external volumes/networks, production credentials or model access.
+x-app-env: &app-env
+  TZ: UTC
+  JAVA_TOOL_OPTIONS: -Duser.timezone=UTC
+  MYSQL_HOST: mysql
+  MYSQL_PORT: 3306
+  MYSQL_PASSWORD: m47-disposable-only
+  # Isolated-only TLS for the ephemeral MySQL self-signed certificate.
+  # Real environments must verify their approved CA/identity.
+  # Align JVM, JDBC and server/session time for DATETIME-based plan expiry.
+  SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/cloudchunk?sslMode=REQUIRED&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&rewriteBatchedStatements=true&useUnicode=true&characterEncoding=utf8
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  RMQ_NAMESRV: namesrv:9876
+  STORAGE_TYPE: minio
+  MINIO_ENDPOINT: http://minio:9000
+  MINIO_AK: m47-disposable
+  MINIO_SK: m47-disposable-secret-only
+  STORAGE_BUCKET: m47-acceptance
+  RETENTION_ENABLED: 'false'
+  ADMIN_SEED_ENABLED: 'false'
+  AI_CHAT_ENABLED: 'false'
+  AI_EMBEDDING_ENABLED: 'false'
+  AI_AGENT_MOVE_ENABLED: 'false'
+  AI_AGENT_RENAME_ENABLED: 'false'
+  AI_QDRANT_ENABLED: 'false'
+  TRACING_SAMPLING: '0.0'
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: m47-disposable-only
+      MYSQL_DATABASE: cloudchunk
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci', '--default-time-zone=+00:00']
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uroot', '-pm47-disposable-only']
+      interval: 3s
+      retries: 40
+      timeout: 3s
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      retries: 20
+      timeout: 3s
+  minio:
+    image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+    command: ['server', '/data']
+    environment:
+      MINIO_ROOT_USER: m47-disposable
+      MINIO_ROOT_PASSWORD: m47-disposable-secret-only
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 3s
+      retries: 40
+      timeout: 3s
+  namesrv:
+    image: cloudchunk-m47-mq:${M47_IMAGE_TAG:?isolated image tag required}
+    command: sh mqnamesrv
+    environment:
+      JAVA_OPT_EXT: '-Xms128m -Xmx128m -Xmn64m'
+  broker:
+    image: cloudchunk-m47-mq:${M47_IMAGE_TAG:?isolated image tag required}
+    command: sh mqbroker -n namesrv:9876 -c /home/rocketmq/acceptance.conf
+    depends_on: [namesrv]
+    environment:
+      JAVA_OPT_EXT: '-Xms256m -Xmx256m -Xmn128m'
+    volumes:
+      - ./broker.conf:/home/rocketmq/acceptance.conf:ro
+    healthcheck:
+      test: ['CMD', 'java', '-Xms16m', '-Xmx64m', '-cp', '/opt/acceptance:/home/rocketmq/rocketmq-5.2.0/lib/*', 'BrokerReadinessProbe']
+      interval: 3s
+      timeout: 8s
+      start_period: 10s
+      retries: 30
+  api:
+    image: cloudchunk-m47:${M47_IMAGE_TAG:?isolated image tag required}
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      broker: {condition: service_healthy}
+    environment:
+      <<: *app-env
+      SPRING_PROFILES_ACTIVE: api,acceptance
+      CLOUDCHUNK_ACCEPTANCE_ENABLED: 'true'
+      CLOUDCHUNK_ACCEPTANCE_MODE: isolated
+      CLOUDCHUNK_ACCEPTANCE_ENVIRONMENT: ${M47_ENVIRONMENT:?environment required}
+  worker:
+    image: cloudchunk-m47:${M47_IMAGE_TAG:?isolated image tag required}
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      broker: {condition: service_healthy}
+    restart: on-failure:3
+    environment:
+      <<: *app-env
+      SPRING_PROFILES_ACTIVE: worker
+  acceptance:
+    image: python:3.12-slim
+    profiles: [runner]
+    working_dir: /work
+    volumes:
+      - ./staging_journey.py:/work/staging_journey.py:ro
+      - ./wait_api.py:/work/wait_api.py:ro
+      - ${M47_REPORT_DIR:?report directory required}:/reports
+    environment:
+      M47_MODE: isolated
+      M47_API_ORIGIN: http://api:8080
+      M47_STORAGE_ORIGIN: http://minio:9000
+      M47_EXPECTED_SHA: ${M47_EXPECTED_SHA:?revision required}
+      M47_ENVIRONMENT: ${M47_ENVIRONMENT:?environment required}
+    command: ['sh', '-c', 'python wait_api.py && python staging_journey.py --report /reports/isolated.json']
+
+networks:
+  default:
+    internal: true

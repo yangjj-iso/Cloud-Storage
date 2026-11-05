@@ -380,6 +380,10 @@ export const api = {
     return parse<DriveAuditEvent[]>(res);
   },
 
+  driveAudit: async (): Promise<Array<{operation:string;success:boolean;costMs:number;at:string}>> => {
+    const res=await fetch(`${API_BASE}/drive/audit`,{headers:authHeaders(),cache:'no-store'});
+    return parse(res);
+  },
   driveList: async (parentId = 0): Promise<UserFileItem[]> => {
     const res = await fetch(`${API_BASE}/drive/list?parentId=${parentId}`, { headers: authHeaders() });
     return parse<UserFileItem[]>(res);
@@ -519,6 +523,20 @@ export const api = {
   },
 
   // ===== Admin =====
+  adminOperations: async (): Promise<AdminOperationsOverview> => {
+    const res = await fetch(`${API_BASE}/admin/operations`, {
+      headers: authHeaders(), cache: 'no-store',
+    });
+    return parse<AdminOperationsOverview>(res);
+  },
+  adminDependencyHealth: async (): Promise<AdminHealthSnapshot> => {
+    const res = await fetch(`${API_BASE}/admin/health-summary`, {
+      headers: authHeaders(),
+      cache: 'no-store',
+    });
+    return parse<AdminHealthSnapshot>(res);
+  },
+
   adminListUsers: async (page = 1, size = 20, keyword = ''): Promise<PageResult<AdminUserItem>> => {
     const q = new URLSearchParams({ page: String(page), size: String(size) });
     if (keyword) q.set('keyword', keyword);
@@ -603,4 +621,43 @@ export const api = {
 
 export function downloadUrl(fileId: string): string {
   return `${API_BASE}/file/${fileId}/download`;
+}
+
+export interface AdminHealthComponent {
+  id: 'mysql' | 'redis' | 'rocketmq' | 'minio' | 'ai-chat' | 'ai-embedding' | 'qdrant';
+  status: 'UP' | 'DOWN' | 'REACHABLE_ONLY' | 'UNREACHABLE' | 'NOT_PROBED' | 'DISABLED';
+  check: 'JDBC' | 'PING' | 'TCP' | 'CONFIGURATION';
+  note: string;
+}
+
+export interface AdminHealthSnapshot {
+  status: 'PARTIALLY_VERIFIED' | 'DEGRADED';
+  sampledAt: string;
+  components: AdminHealthComponent[];
+  oldOutboxEvents: number | null;
+}
+
+export interface AdminOperationsSlo {
+  state: 'UNCONFIGURED' | 'UNAVAILABLE' | 'WARMING' | 'LOW_TRAFFIC' | 'BREACH' | 'OBSERVED';
+  objective: number;
+  observedAvailability: number | null;
+  burnRate1h: number | null;
+  requests7d: number;
+  scrapeCoverage: number;
+  window: string;
+  note: string;
+}
+export interface AdminOperationsAlert {
+  fingerprint: string;
+  name: string;
+  severity: 'critical' | 'warning' | 'unknown';
+  state: string;
+  startedAt: string;
+}
+export interface AdminOperationsOverview {
+  status: 'READ_ONLY' | 'PARTIAL';
+  sampledAt: string;
+  slo: AdminOperationsSlo;
+  alerts: AdminOperationsAlert[];
+  alertSource: 'VERIFIED' | 'UNAVAILABLE' | 'UNCONFIGURED';
 }

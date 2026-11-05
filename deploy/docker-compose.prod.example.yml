@@ -1,0 +1,62 @@
+# Production overlay. Requires Docker Compose v2.24.4+ (!reset support).
+# Use together with base docker-compose.yml, populated env file and config_gate.py.
+# NEVER run base Compose by itself against production data: it exposes debug ports.
+services:
+  mysql:
+    image: ${CC_MYSQL_IMAGE:?pin_mysql_digest}
+    ports: !reset []
+  redis:
+    image: ${CC_REDIS_IMAGE:?pin_redis_digest}
+    ports: !reset []
+  rmq-namesrv:
+    image: ${CC_RMQ_IMAGE:?pin_rocketmq_digest}
+    ports: !reset []
+  rmq-broker:
+    image: ${CC_RMQ_IMAGE:?pin_rocketmq_digest}
+    ports: !reset []
+  rmq-dashboard:
+    image: ${CC_RMQ_DASHBOARD_IMAGE:?pin_dashboard_digest}
+    ports: !reset []
+  minio:
+    image: ${CC_MINIO_IMAGE:?pin_minio_digest}
+    ports: !reset []
+  qdrant:
+    image: ${CC_QDRANT_IMAGE:?pin_qdrant_digest}
+    ports: !reset []
+  api:
+    environment:
+      OPS_PROMETHEUS_URL: http://prometheus:9090
+      OPS_ALERTMANAGER_URL: http://alertmanager:9093
+    image: ${CLOUDCHUNK_API_IMAGE:?pin_backend_digest}
+    build: !reset null
+    ports: !reset []
+  worker:
+    image: ${CLOUDCHUNK_API_IMAGE:?pin_backend_digest}
+  web:
+    image: ${CLOUDCHUNK_WEB_IMAGE:?pin_frontend_digest}
+    build: !reset null
+    # !override replaces the base public port (merge/append would be unsafe).
+    ports: !override ["127.0.0.1:8088:80"]
+  jaeger:
+    image: ${CC_JAEGER_IMAGE:?pin_jaeger_digest}
+    ports: !reset []
+  prometheus:
+    image: ${CC_PROMETHEUS_IMAGE:?pin_prometheus_digest}
+    ports: !reset []
+    volumes: !override
+      - ./observability/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/rules:/etc/prometheus/rules:ro
+      - ${METRICS_TOKEN_FILE:?provide_private_token_file}:/etc/prometheus/metrics-token:ro
+      - prometheus-data:/prometheus
+  alertmanager:
+    image: ${CC_ALERTMANAGER_IMAGE:?pin_alertmanager_digest}
+    ports: !reset []
+    volumes: !override
+      - ${ALERTMANAGER_CONFIG_FILE:?provide_approved_alertmanager_config}:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+  grafana:
+    image: ${CC_GRAFANA_IMAGE:?pin_grafana_digest}
+    ports: !reset []
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?provide_private_password}

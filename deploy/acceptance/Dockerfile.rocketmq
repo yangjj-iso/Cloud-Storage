@@ -1,0 +1,16 @@
+# Keep the existing RocketMQ distribution, refresh only its Java 8 runtime.
+# The old bundled runtime fails StoreUtil initialization on the current CI host.
+FROM apache/rocketmq:5.2.0 AS distribution
+FROM eclipse-temurin:8-jdk
+ENV ROCKETMQ_HOME=/home/rocketmq/rocketmq-5.2.0
+RUN groupadd -g 3000 rocketmq && useradd -u 3000 -g 3000 -m rocketmq
+COPY --from=distribution /home/rocketmq/rocketmq-5.2.0/ /home/rocketmq/rocketmq-5.2.0/
+COPY BrokerRuntimeProbe.java BrokerReadinessProbe.java /tmp/
+RUN mkdir -p /opt/acceptance && javac -cp '/home/rocketmq/rocketmq-5.2.0/lib/*' \
+    -d /opt/acceptance /tmp/BrokerRuntimeProbe.java /tmp/BrokerReadinessProbe.java && \
+    rm /tmp/BrokerRuntimeProbe.java /tmp/BrokerReadinessProbe.java
+USER 3000:3000
+WORKDIR /home/rocketmq/rocketmq-5.2.0/bin
+# No container-awareness bypass, privileged mode or heap-budget relaxation.
+RUN java -cp '/opt/acceptance:/home/rocketmq/rocketmq-5.2.0/lib/*' BrokerRuntimeProbe
+CMD ["sh", "mqnamesrv"]

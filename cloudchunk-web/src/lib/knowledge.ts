@@ -67,6 +67,90 @@ export interface AnswerResponse {
   citations: { citationId: string; evidence: Evidence }[];
   mode: 'MODEL_WITH_CITATIONS' | 'INSUFFICIENT_EVIDENCE';
 }
+export type WorkflowStepState = 'PENDING' | 'APPROVED' | 'APPLIED' | 'SKIPPED' | 'REVERTED';
+export type WorkflowState = 'ACTIVE' | 'CANCELLED' | 'COMPLETED';
+export interface AgentWorkflowSummary {
+  id: string;
+  status: WorkflowState;
+  total: number;
+  applied: number;
+  skipped: number;
+  pending: number;
+  createdAt: string;
+}
+export interface AgentWorkflowStep {
+  stepNo: number;
+  moveProposalId: string;
+  userFileId: string;
+  fileName: string;
+  destinationName: string;
+  expiresAt: string;
+  state: WorkflowStepState;
+}
+export interface AgentWorkflowEvent { stepNo: number; action: string; recordedAt: string }
+export interface AgentWorkflow {
+  summary: AgentWorkflowSummary;
+  steps: AgentWorkflowStep[];
+  events: AgentWorkflowEvent[];
+}
+export type OrganizeMimeCategory = 'ANY' | 'TEXT' | 'PDF' | 'IMAGE' | 'VIDEO';
+export type OrganizeStepState = 'READY' | 'APPROVED' | 'NOT_MATCHED' | 'ALREADY_THERE' | 'NAME_CONFLICT' | 'APPLIED' | 'SKIPPED';
+export interface OrganizeTemplate {
+  id: string;
+  name: string;
+  mimeCategory: OrganizeMimeCategory;
+  destinationId: string;
+  destinationName: string;
+  createdAt: string;
+}
+export interface OrganizeStep { number: number; userFileId: string; fileName: string; state: OrganizeStepState; originalParentId: string }
+export interface OrganizeAudit { number: number; action: string; at: string }
+export interface OrganizeRun {
+  id: string; templateId: string; name: string; mimeCategory: OrganizeMimeCategory;
+  destinationId: string; destinationName: string; status: 'ACTIVE' | 'CANCELLED' | 'COMPLETED' | 'EXPIRED';
+  expiresAt: string; matched: number; blocked: number; steps: OrganizeStep[]; events: OrganizeAudit[];
+}
+
+export type StrategyDecision = 'PENDING' | 'ACCEPTED' | 'REJECTED';
+export type StrategyRejectReason = 'WRONG_FOLDER' | 'WRONG_CATEGORY' | 'INSUFFICIENT_CONTEXT' | 'OTHER';
+export interface StrategyRecommendation {
+  id: string;
+  templateId: string;
+  templateName: string;
+  destinationName: string;
+  userFileId: string;
+  fileName: string;
+  proposalId: string;
+  proposalExpiresAt: string;
+  state: StrategyDecision;
+  feedbackCode: string | null;
+  createdAt: string;
+}
+export interface StrategyConsentReceipt {
+  event: 'CONSENT_GRANTED' | 'RECOMMENDED' | 'REQUEST_FAILED';
+  candidateCount: number;
+  recordedAt: string;
+}
+export interface StrategyPolicy {
+  recommendationsAllowed: boolean;
+  explicitChoice: boolean;
+}
+export interface StrategyReview {
+  id: string;
+  state: 'REQUESTED' | 'REVIEWED';
+  feedbackReason: string;
+  createdAt: string;
+  reviewCode: string | null;
+  reviewedAt: string | null;
+}
+export interface StrategyFeedbackQuality {
+  accepted: number;
+  rejected: number;
+  unrated: number;
+  acceptanceRatio: number | null;
+  window: string;
+  note: string;
+}
 export interface AutoAskResponse {
   response: AnswerResponse;
   retrievalMode: SearchResult['mode'];
@@ -100,7 +184,58 @@ async function request<T>(path: string, signal: AbortSignal, body?: unknown, ove
   }
   return result.data;
 }
+export interface BatchIndexResult { accepted: number; maxBatchSize: number }
+export interface ResearchBrief { evidence: Evidence[]; mode: 'EXACT_AUTHORIZED_EXCERPTS'; complete: boolean }
+
 export const knowledgeApi = {
+  strategyPolicy: (signal: AbortSignal) =>
+    request<StrategyPolicy>('/assistant/strategy/recommendation-policy',signal),
+  setStrategyPolicy: (allowRecommendations: boolean,signal: AbortSignal) =>
+    request<StrategyPolicy>('/assistant/strategy/recommendation-policy',
+      signal,{allowRecommendations,confirmed:true}),
+  feedbackReviews: (signal: AbortSignal) =>
+    request<StrategyReview[]>('/assistant/strategy/feedback-reviews',signal),
+  requestFeedbackReview: (id: string,signal: AbortSignal) =>
+    request<StrategyReview>('/assistant/strategy/recommendations/'+encodeURIComponent(id)+
+      '/review',signal,{confirmed:true}),
+
+  strategyRecommend: (source: SourceRef, templateIds: string[], consent: boolean, signal: AbortSignal) =>
+    request<StrategyRecommendation>('/assistant/strategy/recommend', signal, {source,templateIds,consent}),
+  strategyFeedback: (id: string, decision: Exclude<StrategyDecision,'PENDING'>,
+                     reasonCode: 'USEFUL' | StrategyRejectReason, signal: AbortSignal) =>
+    request<StrategyRecommendation>('/assistant/strategy/recommendations/'+encodeURIComponent(id)+'/feedback',
+      signal,{decision,reasonCode,confirmed:true}),
+  strategyRecommendationHistory: (signal: AbortSignal) =>
+    request<StrategyRecommendation[]>('/assistant/strategy/recommendations', signal),
+  strategyConsentHistory: (signal: AbortSignal) =>
+    request<StrategyConsentReceipt[]>('/assistant/strategy/consent-history',signal),
+  strategyFeedbackQuality: (signal: AbortSignal) =>
+    request<StrategyFeedbackQuality>('/assistant/strategy/quality', signal),
+
+  organizationTemplates: (signal: AbortSignal) =>
+    request<OrganizeTemplate[]>('/organize/templates',signal),
+  createOrganizationTemplate: (name: string, mimeCategory: OrganizeMimeCategory,
+                                destinationId: string, signal: AbortSignal) =>
+    request<OrganizeTemplate>('/organize/templates',signal,{name,mimeCategory,destinationId}),
+  archiveOrganizationTemplate: (id: string, signal: AbortSignal) =>
+    request<void>('/organize/templates/'+encodeURIComponent(id)+'/archive',signal,{confirmed:true}),
+  simulateOrganization: (templateId: string,userFileIds: string[],signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/simulate',signal,{templateId,userFileIds}),
+  organizationRuns: (signal: AbortSignal) =>
+    request<OrganizeRun[]>('/organize/runs',signal),
+  organizationRun: (id: string,signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/runs/'+encodeURIComponent(id),signal),
+  organizationStep: (id: string,stepNo: number,action: 'approve' | 'execute' | 'skip',
+                     signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/runs/'+encodeURIComponent(id)+'/steps/'+stepNo+'/'+action,
+      signal,{confirmed:true}),
+  cancelOrganizationRun: (id: string,signal: AbortSignal) =>
+    request<OrganizeRun>('/organize/runs/'+encodeURIComponent(id)+'/cancel',signal,{confirmed:true}),
+
+  researchBrief: (sources: SourceRef[], signal: AbortSignal) =>
+    request<ResearchBrief>('/research/brief', signal, { sources }),
+  indexBatch: (userFileIds: string[], signal: AbortSignal) =>
+    request<BatchIndexResult>('/documents/index/batch', signal, { userFileIds }),
   library: (page: number, signal: AbortSignal) => request<Library>(`/documents?page=${page}`, signal),
   search: (query: string, signal: AbortSignal) => request<SearchResult>('/search', signal, { query }),
   semanticCapabilities: (signal: AbortSignal) =>
@@ -136,6 +271,18 @@ export const knowledgeApi = {
     request<MoveProposal>('/assistant/move/suggest',signal,{source,consent,candidateFolderIds}),
   applyMove: (id: string, confirmed: boolean, signal: AbortSignal) =>
     request<MoveApplyResult>('/assistant/move/'+encodeURIComponent(id)+'/apply',signal,{confirmed}),
+  createWorkflow: (moveProposalIds: string[], signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows',signal,{moveProposalIds,confirmed:true}),
+  recentWorkflows: (signal: AbortSignal) =>
+    request<AgentWorkflowSummary[]>('/assistant/workflows',signal),
+  workflow: (id: string, signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows/'+encodeURIComponent(id),signal),
+  workflowAction: (id: string, stepNo: number, action: 'approve' | 'skip' | 'execute' | 'undo',
+                   signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows/'+encodeURIComponent(id)+'/steps/'+stepNo+'/'+action,
+      signal,{confirmed:true}),
+  cancelWorkflow: (id: string, signal: AbortSignal) =>
+    request<AgentWorkflow>('/assistant/workflows/'+encodeURIComponent(id)+'/cancel',signal,{confirmed:true}),
   recentMoveProposals: (signal: AbortSignal) =>
     request<MoveProposal[]>('/assistant/move/recent',signal),
   previewBatchMove: (sources: SourceRef[],candidateFolderIds: number[],consent: boolean,signal: AbortSignal) =>

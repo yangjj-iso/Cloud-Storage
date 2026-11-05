@@ -1,0 +1,88 @@
+name: M4.6 product acceptance
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  product-acceptance:
+    name: M4.6 browser and full-stack acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ACCEPTANCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Bind evidence to the actual checkout, including PR merge result
+        run: echo "ACCEPTANCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudchunk-web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reject missing Docker rather than skip real-backend tests
+        run: docker info
+      - name: Build product and test workflow projections
+        working-directory: cloudchunk-web
+        run: npm ci && npm test && npm run build
+      - name: Test fail-closed acceptance evaluator
+        run: python3 -m unittest discover -s deploy/acceptance/tests -v
+      - name: Install pinned test-only browser
+        run: |
+          python3 -m pip install -r deploy/acceptance/requirements.txt
+          python3 -m playwright install --with-deps chromium
+      - name: Reset acceptance evidence
+        run: |
+          rm -rf artifacts/m46
+          mkdir -p artifacts/m46
+      - name: Browser contracts with explicit synthetic API responses
+        id: contracts
+        run: python3 deploy/acceptance/browser_contract.py --dist cloudchunk-web/dist --report artifacts/m46/contract.json
+      - name: Real HTTP and browser journeys with isolated MySQL and Redis
+        if: ${{ !cancelled() && steps.contracts.outcome != 'skipped' }}
+        run: >-
+          mvn -B -pl cloudchunk-boot -am verify
+          -Dit.test=ProductJourneyIT
+          -Dfailsafe.failIfNoSpecifiedTests=false
+          -Dcloudchunk.browser=true
+          -Dmaven.multiModuleProjectDirectory="$GITHUB_WORKSPACE"
+      - name: Enforce required journeys, zero skips, exact revision and performance budgets
+        if: ${{ !cancelled() && steps.contracts.outcome != 'skipped' }}
+        run: |
+          python3 deploy/acceptance/budget_gate.py \
+            --dist cloudchunk-web/dist \
+            --browser artifacts/m46/fullstack.json \
+            --contract artifacts/m46/contract.json \
+            --junit cloudchunk-boot/target/failsafe-reports/TEST-com.cloudchunk.integration.ProductJourneyIT.xml \
+            --report artifacts/m46/acceptance.json \
+            --sha "$ACCEPTANCE_SHA"
+      - name: Publish bounded synthetic acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m46-product-acceptance-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            artifacts/m46/
+            cloudchunk-boot/target/failsafe-reports/TEST-com.cloudchunk.integration.ProductJourneyIT.xml
+            cloudchunk-boot/target/failsafe-reports/com.cloudchunk.integration.ProductJourneyIT.txt
+      - name: Publish build for reproducible browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m46-built-web-${{ github.run_id }}
+          retention-days: 3
+          path: cloudchunk-web/dist/

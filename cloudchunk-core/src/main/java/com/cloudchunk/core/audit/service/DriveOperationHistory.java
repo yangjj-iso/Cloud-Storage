@@ -44,7 +44,7 @@ public class DriveOperationHistory {
                     return "AI_MOVE_APPLY";
                 if(path.matches("^/api/v1/knowledge/assistant/move/[a-f0-9-]{36}/undo$"))
                     return "AI_MOVE_UNDO";
-                
+
             }
             if("DELETE".equals(operation)) {
                 if(path.matches("^/api/v1/drive/[0-9]+$"))return "DRIVE_RECYCLE";

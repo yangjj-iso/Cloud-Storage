@@ -30,12 +30,24 @@ class KnowledgeIsolationIT {
         var result=Flyway.configure().dataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword())
             .locations("classpath:db/migration").load().migrate();
         assertTrue(result.success);
-        assertTrue(result.migrationsExecuted >= 12,"V12 must actually execute");
+        assertTrue(result.migrationsExecuted >= 18,"V18 strategy consent and feedback review migration must execute on fresh MySQL");
     }
     @BeforeEach void setup() {
         var ds=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
         jdbc=new JdbcTemplate(ds); tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
         service=new KnowledgeService(jdbc,mock(IntegrationEventPublisher.class)); index=new KnowledgeIndexStore(jdbc);
+        jdbc.update("DELETE FROM ai_strategy_feedback_review");
+        jdbc.update("DELETE FROM ai_strategy_user_policy");
+        jdbc.update("DELETE FROM ai_strategy_consent_audit");
+        jdbc.update("DELETE FROM ai_strategy_retention_run");
+        jdbc.update("DELETE FROM ai_strategy_recommendation");
+        jdbc.update("DELETE FROM ai_organize_run_event");
+        jdbc.update("DELETE FROM ai_organize_run_step");
+        jdbc.update("DELETE FROM ai_organize_run");
+        jdbc.update("DELETE FROM ai_organize_template");
+        jdbc.update("DELETE FROM ai_agent_workflow_event");
+        jdbc.update("DELETE FROM ai_agent_workflow_step");
+        jdbc.update("DELETE FROM ai_agent_workflow");
         jdbc.update("DELETE FROM ai_rename_proposal");
         jdbc.update("DELETE FROM ai_move_proposal");
         jdbc.update("DELETE FROM knowledge_document"); jdbc.update("DELETE FROM user_file"); jdbc.update("DELETE FROM file_meta");
@@ -50,6 +62,429 @@ class KnowledgeIsolationIT {
     private void publish(KnowledgeIndexStore.Claim c,String text) {
         tx.executeWithoutResult(s -> index.publish(c,text,"READY",null));
     }
+    @Test void strategyPrivacyHistoryIsOwnerScopedAndRetentionRequiresExplicitOperatorAction() {
+        var gov=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService(jdbc,false);
+        gov.record(1,"CONSENT_GRANTED",2);
+        gov.record(1,"RECOMMENDED",2);
+        gov.record(2,"CONSENT_GRANTED",1);
+        assertEquals(2,gov.history(1).size());
+        assertEquals(1,gov.history(2).size());
+        assertEquals("CONSENT_GRANTED",gov.history(2).getFirst().event());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            gov.record(1,"FREE_TEXT_PROMPT",1));
+
+        jdbc.update("UPDATE ai_strategy_consent_audit SET created_at=DATE_SUB(NOW(3),INTERVAL 181 DAY) WHERE user_id=1");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'MyFolder',1,0)");
+        var template=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+            jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class))
+            .create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Archive","TEXT","200"));
+        String moveId="aaaa1111-1111-4111-8111-111111111111";
+        insertMoveProposal(moveId,1,101,"Alice.txt");
+        jdbc.update("""
+            INSERT INTO ai_strategy_recommendation
+             (id,user_id,template_id,move_proposal_id,user_file_id,created_at)
+            VALUES (?,?,?,?,?,DATE_SUB(NOW(3),INTERVAL 91 DAY))
+            ""","bbbb2222-2222-4222-8222-222222222222",1L,template.id(),moveId,101L);
+        assertEquals(1,gov.preview().expiredRecommendations());
+        assertEquals(2,gov.preview().expiredConsentEvents());
+        assertFalse(gov.preview().applyEnabled());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            gov.purge(1,new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.CleanupRequest(
+                true,"CHANGE-REVIEW-123456")));
+
+        var allowed=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService(jdbc,true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            allowed.purge(1,new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.CleanupRequest(
+                false,"CHANGE-REVIEW-123456")));
+        var receipt=allowed.purge(1,
+            new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.CleanupRequest(
+                true,"CHANGE-REVIEW-123456"));
+        assertEquals(1,receipt.recommendationsPurged());
+        assertEquals(2,receipt.consentEventsPurged());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_move_proposal WHERE id=?",Integer.class,moveId));
+        assertEquals(0,gov.history(1).size());
+        assertEquals(1,gov.history(2).size());
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_strategy_retention_run",Integer.class));
+        assertEquals(0,allowed.preview().expiredConsentEvents());
+    }
+
+    @Test void explicitFutureConsentOptOutBlocksProviderButKeepsPerRequestConsent() {
+        var governance=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService(jdbc,false);
+        assertTrue(governance.policy(1).recommendationsAllowed());
+        assertFalse(governance.policy(1).explicitChoice());
+        var no=new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.StrategyChoice(false,true);
+        assertFalse(governance.choose(1,no).recommendationsAllowed());
+        assertTrue(governance.policy(1).explicitChoice());
+        assertTrue(governance.policy(2).recommendationsAllowed());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> governance.ensureAllowed(1));
+        var agent=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var ai=new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(jdbc,service,agent);
+        org.springframework.test.util.ReflectionTestUtils.setField(ai,"governance",governance);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            ai.suggest(1,new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",1,0),
+                java.util.List.of("11111111-1111-4111-8111-111111111111"),true)));
+        verifyNoInteractions(agent);
+        assertEquals("RECOMMENDATIONS_BLOCKED",governance.history(1).getFirst().event());
+        assertEquals(0,governance.history(1).getFirst().candidateCount());
+        assertTrue(governance.choose(1,
+            new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.StrategyChoice(true,true))
+            .recommendationsAllowed());
+        assertDoesNotThrow(()->governance.ensureAllowed(1));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+            governance.choose(1,new com.cloudchunk.core.knowledge.AiStrategyPrivacyGovernanceService.StrategyChoice(false,false)));
+    }
+
+    @Test void humanFeedbackReviewRequiresOwnerLiveGenerationAndIndependentAdmin() {
+        var c=claim();
+        publish(c,"Evidence snapshot for review");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Research',1,0)");
+        var policy=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+                jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class))
+                .create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                    "Review notes","TEXT","200"));
+        String moveId="aaaa1111-1111-4111-8111-111111111111";
+        String recId="bbbb2222-2222-4222-8222-222222222222";
+        insertMoveProposal(moveId,1,101,"Alice.txt");
+        jdbc.update("""
+           INSERT INTO ai_strategy_recommendation
+             (id,user_id,template_id,move_proposal_id,user_file_id,source_generation,
+              status,feedback_code)
+           VALUES (?,1,?,?,101,?,'REJECTED','WRONG_FOLDER')
+           """,recId,policy.id(),moveId,c.generation());
+        var reviews=new com.cloudchunk.core.knowledge.AiStrategyFeedbackReviewService(jdbc);
+        var yes=new com.cloudchunk.core.knowledge.AiStrategyFeedbackReviewService.Confirm(true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.request(2,recId,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.request(1,recId,
+                    new com.cloudchunk.core.knowledge.AiStrategyFeedbackReviewService.Confirm(false)));
+        var requested=reviews.request(1,recId,yes);
+        assertEquals("REQUESTED",requested.state());
+        assertEquals("WRONG_FOLDER",requested.feedbackReason());
+        assertEquals(1,reviews.mine(1).size());
+        assertTrue(reviews.mine(2).isEmpty());
+        assertEquals(1,reviews.pending().size());
+        assertThrows(org.springframework.dao.DuplicateKeyException.class,
+                () -> reviews.request(1,recId,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.resolve(1,requested.id(),"CONFIRMED",yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.resolve(2,requested.id(),"ARBITRARY_TEXT",yes));
+        assertEquals("REVIEWED",
+                reviews.resolve(2,requested.id(),"FOLLOWUP_REQUIRED",yes).state());
+        assertEquals("FOLLOWUP_REQUIRED",reviews.mine(1).getFirst().reviewCode());
+        assertTrue(reviews.pending().isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.resolve(2,requested.id(),"CONFIRMED",yes));
+
+        jdbc.update("UPDATE knowledge_document SET generation=generation+1 WHERE file_id=?",FILE);
+        assertTrue(new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(
+                jdbc,service,mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class))
+                .recent(1).isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> reviews.request(1,recId,yes));
+    }
+
+    @Test void aiStrategyRecommendationChecksTemplateOwnershipBeforeAgentAndFeedbackIsPrivate() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Research',1,0)");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (201,2,'PrivateFolder',1,0)");
+        var move=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var strategy=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+                jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class));
+        var template=strategy.create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Sort text notes","TEXT","200"));
+        var foreign=strategy.create(2,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Other owner's folder","TEXT","201"));
+        var claim=claim();publish(claim,"Text describing safe data recovery.");
+        when(move.capabilities()).thenReturn(
+                new com.cloudchunk.core.knowledge.AiMoveAgentService.Capabilities(
+                    true,"SINGLE_FILE_MOVE_WITH_CONFIRMATION"));
+        String proposalId="11111111-1111-4111-8111-111111111111";
+        when(move.suggest(eq(1L),any())).thenAnswer(inv->{
+            var request=inv.getArgument(1,com.cloudchunk.core.knowledge.AiMoveAgentService.SuggestRequest.class);
+            assertEquals(java.util.List.of(200L),request.candidateFolderIds());
+            assertTrue(request.consent());
+            insertMoveProposal(proposalId,1,101,"Alice.txt");
+            jdbc.update("UPDATE ai_move_proposal SET destination_id=200,destination_name='Research' WHERE id=?",proposalId);
+            return new com.cloudchunk.core.knowledge.AiMoveAgentService.Proposal(
+                    proposalId,"101","Alice.txt",0,200L,"Research","2099-01-01T00:00:00","PENDING");
+        });
+        var ai=new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(jdbc,service,move);
+        var ref=new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",claim.generation(),0);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.suggest(1,new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                        ref,java.util.List.of(template.id(),foreign.id()),true)));
+        verify(move,never()).suggest(anyLong(),any());
+
+        var recommendation=ai.suggest(1,
+                new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                    ref,java.util.List.of(template.id()),true));
+        assertEquals(template.id(),recommendation.templateId());
+        assertEquals("PENDING",recommendation.state());
+        assertEquals(1,ai.quality(1).unrated());
+        assertEquals(1,ai.recent(1).size());
+        assertTrue(ai.recent(2).isEmpty());
+        assertEquals(0,ai.quality(2).unrated());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.rate(2,recommendation.id(),
+                    new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                        "ACCEPTED","USEFUL",true)));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.rate(1,recommendation.id(),
+                    new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                        "REJECTED","anything raw",true)));
+        var rated=ai.rate(1,recommendation.id(),
+                new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                    "REJECTED","WRONG_FOLDER",true));
+        assertEquals("REJECTED",rated.state());
+        assertEquals("WRONG_FOLDER",rated.feedbackCode());
+        assertEquals(1,ai.quality(1).rejected());
+        assertNull(ai.quality(1).acceptanceRatio());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.rate(1,recommendation.id(),
+                    new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.RateRequest(
+                        "ACCEPTED","USEFUL",true)));
+        // Feedback and the template recommendation never call UserFileService.move.
+        verify(move,times(1)).suggest(eq(1L),any());
+        jdbc.update("UPDATE user_file SET status=1 WHERE id=101");
+        assertTrue(ai.recent(1).isEmpty());
+    }
+
+    @Test void aiStrategyRecommendationRejectsCategoryMismatchBeforeModelAndNoAuditRowWritten() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Research',1,0)");
+        var policy=new com.cloudchunk.core.knowledge.OrganizationTemplateService(
+                jdbc,mock(com.cloudchunk.core.drive.service.UserFileService.class))
+                .create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                        "Only PDFs","PDF","200"));
+        var claim=claim();publish(claim,"Some text content");
+        var move=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        when(move.capabilities()).thenReturn(
+                new com.cloudchunk.core.knowledge.AiMoveAgentService.Capabilities(true,"MOVE"));
+        var ai=new com.cloudchunk.core.knowledge.AiStrategyRecommendationService(jdbc,service,move);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                ai.suggest(1,new com.cloudchunk.core.knowledge.AiStrategyRecommendationService.SuggestRequest(
+                    new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101",claim.generation(),0),
+                    java.util.List.of(policy.id()),true)));
+        verify(move,never()).suggest(anyLong(),any());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_strategy_recommendation",Integer.class));
+    }
+
+    @Test void organizingTemplateSimulationBlocksCrossAccountAndRequiresSeparateApproval() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Organized',1,0)");
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        var policies=new com.cloudchunk.core.knowledge.OrganizationTemplateService(jdbc,drive);
+        var policy=policies.create(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                "Text to Organized","TEXT","200"));
+        assertEquals("Organized",policy.destinationName());
+        assertEquals(1,policies.templates(1).size());
+        assertTrue(policies.templates(2).isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->policies.simulate(2,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("102"))));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->policies.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101","102"))));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_organize_run",Integer.class));
+        var plan=policies.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101")));
+        assertEquals("READY",plan.steps().getFirst().state());
+        assertEquals("ACTIVE",plan.status());
+        assertEquals(1,plan.matched());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->policies.detail(2,plan.id()));
+        var yes=new com.cloudchunk.core.knowledge.OrganizationTemplateService.Confirm(true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.execute(1,plan.id(),1,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.approve(1,plan.id(),1,
+                        new com.cloudchunk.core.knowledge.OrganizationTemplateService.Confirm(false)));
+        assertEquals("APPROVED",policies.approve(1,plan.id(),1,yes).steps().getFirst().state());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.approve(1,plan.id(),1,yes));
+        doAnswer(inv -> {
+            jdbc.update("UPDATE user_file SET parent_id=200 WHERE id=101 AND user_id=1");
+            return null;
+        }).when(drive).move(101L,1L,200L);
+        var applied=policies.execute(1,plan.id(),1,yes);
+        assertEquals("APPLIED",applied.steps().getFirst().state());
+        assertEquals("COMPLETED",applied.status());
+        assertEquals(200L,jdbc.queryForObject(
+                "SELECT parent_id FROM user_file WHERE id=101",Long.class));
+        verify(drive,times(1)).move(101L,1L,200L);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.execute(1,plan.id(),1,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policies.cancel(1,plan.id(),yes));
+        assertEquals(3,jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ai_organize_run_event WHERE run_id=?",Integer.class,plan.id()));
+    }
+
+    @Test void organizingDryRunExposesConflictsAndExecutionBlocksStaleSnapshots() {
+        jdbc.update("INSERT INTO user_file(id,user_id,file_name,is_dir,parent_id) VALUES (200,1,'Destination',1,0)");
+        jdbc.update("INSERT INTO user_file(id,user_id,file_id,file_name,is_dir,parent_id) VALUES (202,1,?,'Alice.txt',0,200)",FILE);
+        var drive=mock(com.cloudchunk.core.drive.service.UserFileService.class);
+        var policyService=new com.cloudchunk.core.knowledge.OrganizationTemplateService(jdbc,drive);
+        var policy=policyService.create(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.CreateTemplate(
+                        "Text files","TEXT","200"));
+        var yes=new com.cloudchunk.core.knowledge.OrganizationTemplateService.Confirm(true);
+        var blocked=policyService.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101")));
+        assertEquals("NAME_CONFLICT",blocked.steps().getFirst().state());
+        assertEquals(1,blocked.blocked());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.approve(1,blocked.id(),1,yes));
+        assertEquals("COMPLETED",policyService.skip(1,blocked.id(),1,yes).status());
+        verifyNoInteractions(drive);
+
+        jdbc.update("DELETE FROM user_file WHERE id=202");
+        var fresh=policyService.simulate(1,
+                new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101")));
+        policyService.approve(1,fresh.id(),1,yes);
+        jdbc.update("UPDATE user_file SET file_name='Changed.txt',updated_at=DATE_ADD(updated_at,INTERVAL 1 SECOND) WHERE id=101");
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.execute(1,fresh.id(),1,yes));
+        verifyNoInteractions(drive);
+        assertEquals("APPROVED",policyService.detail(1,fresh.id()).steps().getFirst().state());
+        assertEquals("CANCELLED",policyService.cancel(1,fresh.id(),yes).status());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.execute(1,fresh.id(),1,yes));
+        policyService.archive(1,policy.id(),yes);
+        assertTrue(policyService.templates(1).isEmpty());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,()->
+                policyService.simulate(1,new com.cloudchunk.core.knowledge.OrganizationTemplateService.SimulateRequest(
+                        policy.id(),java.util.List.of("101"))));
+        verifyNoInteractions(drive);
+    }
+
+    @Test void durableAgentPlanRequiresOwnershipAndSequentialExplicitActions() {
+        // All proposals are synthetic; existing AiMoveAgentService tests cover actual
+        // file state, row-lock, sibling conflict and 15-minute conditional undo.
+        var move = mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var planService = new com.cloudchunk.core.knowledge.AiWorkflowService(jdbc,move);
+        var p1 = "11111111-1111-4111-8111-111111111111";
+        var p2 = "22222222-2222-4222-8222-222222222222";
+        var foreign = "33333333-3333-4333-8333-333333333333";
+        jdbc.update("INSERT INTO user_file(id,user_id,file_id,file_name) VALUES (103,1,?,'AliceSecond.txt')",FILE);
+        insertMoveProposal(p1,1,101,"Alice.txt");
+        insertMoveProposal(p2,1,103,"AliceSecond.txt");
+        insertMoveProposal(foreign,2,102,"Bob.txt");
+
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            planService.create(1,new com.cloudchunk.core.knowledge.AiWorkflowService.CreateRequest(
+                java.util.List.of(p1,foreign),true)));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_workflow",Integer.class));
+
+        var created = planService.create(1,
+            new com.cloudchunk.core.knowledge.AiWorkflowService.CreateRequest(
+                java.util.List.of(p1,p2),true));
+        String id=created.summary().id();
+        assertEquals("ACTIVE",created.summary().status());
+        assertEquals(2,created.summary().pending());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.detail(2,id));
+        var yes = new com.cloudchunk.core.knowledge.AiWorkflowService.ConfirmRequest(true);
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.approve(1,id,2,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.execute(1,id,1,yes));
+        assertEquals("APPROVED",planService.approve(1,id,1,yes).steps().getFirst().state());
+        assertEquals("APPLIED",planService.execute(1,id,1,yes).steps().getFirst().state());
+        verify(move).apply(eq(1L),eq(p1),any());
+        assertEquals("REVERTED",planService.undo(1,id,1,yes).steps().getFirst().state());
+        verify(move).undo(eq(1L),eq(p1),any());
+        planService.approve(1,id,2,yes);
+        var completed=planService.skip(1,id,2,yes);
+        assertEquals("COMPLETED",completed.summary().status());
+        assertEquals(6,jdbc.queryForObject(
+            "SELECT COUNT(*) FROM ai_agent_workflow_event WHERE workflow_id=?",Integer.class,id));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.execute(1,id,2,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.cancel(1,id,yes));
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planService.cancel(2,id,yes));
+    }
+
+    @Test void cancelledAgentPlanCannotApplyButCanUndoEarlierApprovedMove() {
+        var move=mock(com.cloudchunk.core.knowledge.AiMoveAgentService.class);
+        var planner=new com.cloudchunk.core.knowledge.AiWorkflowService(jdbc,move);
+        var p1="44444444-4444-4444-8444-444444444444";
+        var p2="55555555-5555-4555-8555-555555555555";
+        jdbc.update("INSERT INTO user_file(id,user_id,file_id,file_name) VALUES (103,1,?,'Another.txt')",FILE);
+        insertMoveProposal(p1,1,101,"Alice.txt");
+        insertMoveProposal(p2,1,103,"Another.txt");
+        var confirmed=new com.cloudchunk.core.knowledge.AiWorkflowService.ConfirmRequest(true);
+        String id=planner.create(1,new com.cloudchunk.core.knowledge.AiWorkflowService.CreateRequest(
+            java.util.List.of(p1,p2),true)).summary().id();
+        planner.approve(1,id,1,confirmed);
+        planner.execute(1,id,1,confirmed);
+        assertEquals("CANCELLED",planner.cancel(1,id,confirmed).summary().status());
+        assertThrows(com.cloudchunk.common.exception.BizException.class,
+            () -> planner.approve(1,id,2,confirmed));
+        assertEquals("REVERTED",planner.undo(1,id,1,confirmed).steps().getFirst().state());
+        verify(move).undo(eq(1L),eq(p1),any());
+        verify(move,never()).apply(eq(1L),eq(p2),any());
+    }
+
+    private void insertMoveProposal(String id,long userId,long entry,String name) {
+        jdbc.update("""
+            INSERT INTO ai_move_proposal(id,user_id,user_file_id,generation,chunk_index,
+                original_name,source_parent_id,source_updated_at,destination_id,
+                destination_name,destination_parent_id,destination_updated_at,expires_at)
+            VALUES (?,?,?,1,0,?,0,NOW(3),900,'Synthetic folder',0,
+                    NOW(3),DATE_ADD(NOW(3),INTERVAL 10 MINUTE))
+            """,id,userId,entry,name);
+    }
+
+    @Test void researchBriefRechecksActualOwnerAndGenerationAtExportTime() {
+        var c = claim();
+        publish(c, "citation text for export only");
+        var brief = new com.cloudchunk.core.knowledge.ResearchBriefService(service);
+        var ref = new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101", c.generation(), 0);
+        var data = brief.prepare(1, java.util.List.of(ref));
+        assertEquals("EXACT_AUTHORIZED_EXCERPTS", data.mode());
+        assertEquals("citation text for export only", data.evidence().getFirst().content());
+        assertEquals(com.cloudchunk.common.exception.ErrorCode.AI_SOURCE_CHANGED,
+            assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> brief.prepare(2, java.util.List.of(ref))).getErrorCode());
+        jdbc.update("UPDATE user_file SET status=1 WHERE id=101");
+        assertEquals(com.cloudchunk.common.exception.ErrorCode.AI_SOURCE_CHANGED,
+            assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> brief.prepare(1, java.util.List.of(ref))).getErrorCode());
+        jdbc.update("UPDATE user_file SET status=0 WHERE id=101");
+        assertEquals(com.cloudchunk.common.exception.ErrorCode.AI_SOURCE_CHANGED,
+            assertThrows(com.cloudchunk.common.exception.BizException.class,
+                () -> brief.prepare(1, java.util.List.of(
+                    new com.cloudchunk.core.knowledge.KnowledgeModels.SourceRef("101", c.generation()+1, 0)))).getErrorCode());
+    }
+
+    @Test void bulkIndexIsAllOrNothingForUnownedEntriesAndBounded() {
+        // Both entries reference one physical object, but only entry 101 belongs to user 1.
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of("101", "102")));
+        assertEquals(0, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM knowledge_document", Integer.class));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of("101", "101")));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of()));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of("101", "-1")));
+        assertThrows(com.cloudchunk.common.exception.BizException.class, () ->
+            service.requestIndexBatch(1, java.util.List.of("9223372036854775808")));
+        var result = service.requestIndexBatch(1, java.util.List.of("101"));
+        assertEquals(1, result.accepted());
+        assertEquals(8, result.maxBatchSize());
+        assertEquals(1, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM knowledge_document", Integer.class));
+    }
+
     @Test void liveOwnershipGatesSearchAndEvidenceEvenWhenPhysicalContentIsShared() {
         var c=claim(); publish(c,"needle: shared content");
         assertEquals(1,service.search(1,"needle").evidence().size());

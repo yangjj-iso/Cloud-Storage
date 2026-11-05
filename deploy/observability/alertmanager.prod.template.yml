@@ -1,0 +1,19 @@
+# TEMPLATE ONLY. Copy OUTSIDE the repository; replace the placeholder endpoint
+# with your approved internal HTTPS paging/incident webhook and secure this file.
+global:
+  resolve_timeout: 5m
+route:
+  receiver: oncall-webhook
+  group_by: ["alertname", "service", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ["severity=\"critical\""]
+      receiver: oncall-webhook
+      continue: false
+receivers:
+  - name: oncall-webhook
+    webhook_configs:
+      - url: https://replace-with-approved-alert-endpoint.invalid/cloudchunk
+        send_resolved: true

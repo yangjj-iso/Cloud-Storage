@@ -24,6 +24,18 @@
 | 文档 | 说明 |
 | --- | --- |
 | [根 README](../README.md) | 环境要求、依赖启动、端口和前后端启动命令 |
+| [M3.5 正式发布准备](./26-release-readiness.md) | 配置门禁、备份/恢复演练、生产审批和回滚手册 |
+| [M3.6 生产稳定性](./27-production-stability.md) | 私有指标抓取、告警规则、发布后 SLO 门禁、安全回滚 |
+| [M3.6 P1 依赖韧性](./28-dependency-resilience.md) | 管理员只读运维状态、MinIO/MQ/AI 故障注入回归 |
+| [M3.7 生产韧性验收](./29-resilience-acceptance.md) | 隔离环境真实依赖停机/恢复、Alertmanager 路由检查与链式审计 |
+| [M3.8 SLO 与事件闭环](./30-operations-slo-incident.md) | 只读观察指标、活动告警与运维审计状态机 |
+| [M3.9 业务 SLI 与故障复盘](./31-business-sli-postmortem.md) | 业务口径的监控与告警、审计式复盘草稿 |
+| [M4.0 AI-Native 工作台](./32-ai-native-workspace.md) | AI 首屏、研究工作流、授权批量索引与 Markdown 证据摘录 |
+| [M4.1 受控 Agent 工作流](./33-reviewed-agent-workflows.md) | 计划保存、逐步审批与执行、有限审计记录、Flyway V14 |
+| [M4.2 整理策略与模拟](./34-organizing-templates.md) | 规则模板、MIME 匹配、同名冲突与版本模拟、逐项确认执行 |
+| [M4.3 AI 推荐与反馈](./35-ai-strategy-feedback.md) | 已授权证据驱动的规则候选、单次反馈、用户级质量样本 |
+| [M4.4 质量评测与隐私治理](./36-ai-quality-privacy-governance.md) | 合成离线评分、用户授权记录、管理员保留期预检与有限处理 |
+| [M4.5 评测与授权生命周期](./37-ai-consent-review-benchmark.md) | SHA-256 版本基准、用户模型推荐偏好、管理员分类反馈复核 |
 | [08 基准测试与量化边界](./08-benchmark-metrics.md) | JMH、k6、Shell 脚本与指标解释 |
 | [前端 README](../cloudchunk-web/README.md) | Web 功能覆盖、开发代理和构建 |
 | [压测脚本 README](../deploy/bench/README.md) | k6/Shell 命令、认证和环境变量 |
@@ -55,6 +67,15 @@
 | 公开分享浏览、公开下载、转存 | 已实现 | 已接入 |
 | 目录 ZIP 下载、修改邮箱 | 已实现 | 已接入 |
 | 上传 WebSocket 进度 | 后端处理器已实现 | 已接入 |
+| AI-Native 资料工作台、全文搜索与问答 | 已实现 | 已接入 |
+| AI 批量资料索引（最多 8 份） | 已实现 | 已接入 |
+| 研究摘录（最多 12 段，导出前重新鉴权） | 已实现 | 已接入 |
+| AI 多步骤移动工作流（需逐步批准） | 已实现 | 已接入 |
+| 规则模板与冲突模拟（不调用模型） | 已实现 | 已接入 |
+| 证据驱动的 AI 策略推荐与分类型反馈 | 已实现 | 已接入 |
+| AI 推荐授权元数据历史 | 已实现 | 已接入 |
+| AI 隐私保留期预检与人工受控处理 | 已实现 | 管理员接口，默认禁止执行 |
+| 策略推荐关闭/复开与反馈人工复核 | 已实现 | AI 隐私页及管理员分类队列 |
 | IndexedDB 冷启动任务恢复 | 上传状态会写入 | 未实现自动恢复 |
 
 ## 文档维护规则

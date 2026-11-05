@@ -1,0 +1,25 @@
+.ai-privacy{padding:4px 0 30px}
+.ai-privacy-top{display:flex;justify-content:space-between;gap:22px;flex-wrap:wrap;padding:22px;background:#f2f9f3;border:1px solid #c9e2d4;border-radius:17px}
+.ai-privacy-top>div:first-child{flex:1;min-width:230px}.ai-privacy-top h3{font-size:19px;font-weight:750;margin:7px 0;color:#254c40}
+.ai-privacy-top p{line-height:1.8;font-size:13px;color:#557569;max-width:600px}
+.ai-privacy-top .ai-privacy-note{font-size:11px;color:#71877c;margin-top:10px}
+.ai-privacy-switch{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:10px}
+.ai-privacy-switch strong{font-size:14px}.ai-privacy-switch small{font-size:11px;color:#7d8c80}
+.ai-privacy-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+.ai-privacy-section{background:#fff;padding:22px;border:1px solid #e0eae4;border-radius:16px;min-width:0}
+.ai-privacy-section h3{display:flex;gap:8px;align-items:center;color:#356b55;font-size:17px;font-weight:720}
+.ai-privacy-section>p{font-size:12px;color:#7a8b7f;line-height:1.8;margin:9px 0 17px}
+.ai-privacy-section h4{font-size:13px;font-weight:730;margin:20px 0 9px}
+.ai-privacy-section ol{list-style:none;padding:0;max-height:390px;overflow:auto}
+.ai-privacy-section li{border-bottom:1px solid #edf3ef;padding:12px 0}
+.ai-privacy-section li strong,.ai-privacy-review strong{font-size:12px;color:#355748;display:block}
+.ai-privacy-section li span,.ai-privacy-review small,.ai-privacy-rated small{display:block;font-size:11px;color:#84958b;margin-top:5px;line-height:1.6}
+.ai-privacy-muted{font-size:12px;color:#879b8d}
+.ai-privacy-counts{display:flex;gap:14px;flex-wrap:wrap;background:#f2f8f3;padding:13px;border-radius:10px;font-size:12px;color:#557164}
+.ai-privacy-counts strong{color:#225e48}
+.ai-privacy-rated,.ai-privacy-review{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #e5eee8;padding:12px 0}
+.ai-privacy-rated>div{flex:1;min-width:0}.ai-privacy-rated strong{font-size:12px;word-break:break-word}
+.ai-privacy-rated button{flex:none;font-size:11px;min-height:32px}
+.ai-privacy-review{display:block}
+@media(max-width:900px){.ai-privacy-columns{grid-template-columns:1fr}}
+@media(max-width:540px){.ai-privacy-switch{align-items:flex-start}.ai-privacy-section{padding:16px}}

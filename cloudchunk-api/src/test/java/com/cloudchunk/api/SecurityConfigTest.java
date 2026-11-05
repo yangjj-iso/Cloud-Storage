@@ -12,6 +12,7 @@ import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,6 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(controllers = SecurityConfigTest.TestRoutes.class)
+@TestPropertySource(properties = "cloudchunk.observability.prometheus-scrape-token=ci-only-scrape-credential-length-is-greater-than-32")
 @ContextConfiguration(classes = {
         SecurityConfigTest.TestApplication.class,
         SecurityConfig.class,
@@ -51,6 +53,14 @@ class SecurityConfigTest {
 
         mvc.perform(get("/api/v1/private").header("Authorization", "Bearer user-token"))
                 .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/strategy-feedback-reviews").header("Authorization", "Bearer user-token"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/strategy-retention/preview").header("Authorization", "Bearer user-token"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/operations").header("Authorization", "Bearer user-token"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/admin/health-summary").header("Authorization", "Bearer user-token"))
+                .andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/admin/test").header("Authorization", "Bearer user-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value(ErrorCode.FORBIDDEN.getCode()));
@@ -61,6 +71,14 @@ class SecurityConfigTest {
         when(authService.resolvePrincipal("admin-token"))
                 .thenReturn(Optional.of(new AuthenticatedPrincipal(1L, "admin")));
 
+        mvc.perform(get("/api/v1/admin/strategy-feedback-reviews").header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/strategy-retention/preview").header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/operations").header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/health-summary").header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isOk());
         mvc.perform(get("/api/v1/admin/test").header("Authorization", "Bearer admin-token"))
                 .andExpect(status().isOk());
     }
@@ -83,12 +101,32 @@ class SecurityConfigTest {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    void metricsTokenCannotAccessOtherRoutesAndInvalidTokenCannotScrape() throws Exception {
+        mvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/actuator/prometheus")
+                .header("Authorization", "Bearer incorrect"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/actuator/prometheus")
+                .header("Authorization", "Bearer ci-only-scrape-credential-length-is-greater-than-32"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/private")
+                .header("Authorization", "Bearer ci-only-scrape-credential-length-is-greater-than-32"))
+                .andExpect(status().isUnauthorized());
+    }
+
     @RestController
     static class TestRoutes {
         @GetMapping("/api/v1/ping") R<String> ping() { return R.ok("pong"); }
         @GetMapping("/api/v1/private") R<String> privateRoute() { return R.ok("ok"); }
         @GetMapping("/api/v1/admin/test") R<String> adminRoute() { return R.ok("ok"); }
+        @GetMapping("/api/v1/admin/health-summary") R<String> adminHealth() { return R.ok("mock-safe"); }
+        @GetMapping("/api/v1/admin/strategy-feedback-reviews") R<String> reviewQueue() { return R.ok("category-only"); }
+        @GetMapping("/api/v1/admin/strategy-retention/preview") R<String> retentionPreview() { return R.ok("dry-run"); }
+        @GetMapping("/api/v1/admin/operations") R<String> adminOps() { return R.ok("mock-safe"); }
         @GetMapping("/actuator/health") R<String> health() { return R.ok("UP"); }
+        @GetMapping("/actuator/prometheus") R<String> prometheus() { return R.ok("metrics"); }
         @GetMapping("/actuator/metrics") R<String> metrics() { return R.ok("metrics"); }
     }
 

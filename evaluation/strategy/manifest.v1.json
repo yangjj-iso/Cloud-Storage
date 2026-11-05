@@ -1,0 +1,9 @@
+{
+  "version": "v1",
+  "fixture": "synthetic_cases.jsonl",
+  "sha256": "8ff2cdb1803a318d8b1543c715c6aa15d8bf71298144714b3fc8c205b1d7f581",
+  "minimum_samples": 12,
+  "minimum_eligible": 8,
+  "minimum_top1": 0.70,
+  "required_scenarios": ["routine", "ambiguous", "mismatch", "revoked", "conflict"]
+}

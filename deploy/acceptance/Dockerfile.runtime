@@ -1,0 +1,21 @@
+# Package only a jar built from this checkout; stamp its exact revision for the opt-in identity endpoint.
+FROM eclipse-temurin:21-jdk AS stamp
+ARG REVISION
+WORKDIR /stamp
+COPY cloudchunk-boot/target/cloudchunk-boot.jar ./cloudchunk.jar
+RUN printf '%s' "$REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
+    mkdir -p BOOT-INF/classes/META-INF && \
+    printf '%s' "$REVISION" > BOOT-INF/classes/META-INF/cloudchunk-revision.txt && \
+    jar uf cloudchunk.jar BOOT-INF/classes/META-INF/cloudchunk-revision.txt
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+RUN useradd --system --uid 10001 --create-home cloudchunk && \
+    mkdir -p /app/local-storage /app/logs && \
+    chown 10001 /app/local-storage /app/logs
+COPY --from=stamp /stamp/cloudchunk.jar /app/cloudchunk.jar
+USER 10001
+# Verify the runtime user can write data/logs, but cannot modify the application jar.
+RUN test -w /app/logs && test -w /app/local-storage && \
+    test -w /home/cloudchunk && test ! -w /app/cloudchunk.jar
+ENTRYPOINT ["java", "-Xms128m", "-Xmx512m", "-jar", "/app/cloudchunk.jar"]

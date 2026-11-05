@@ -47,11 +47,23 @@ public class OperationAuditFilter extends OncePerRequestFilter {
             completed = true;
         } finally {
             long costMs = (System.nanoTime() - started) / 1_000_000L;
-            String opType = DriveOperationHistory.classify(request.getRequestURI(),request.getMethod());
+            String opType = operation(request.getRequestURI(),request.getMethod());
             boolean success = completed && response.getStatus() < 400;
-            auditService.record(UserContext.get(), opType, request.getRequestURI(),
+            // No request path, file IDs or filenames in audit rows. Operation names are fixed.
+            auditService.record(UserContext.get(), opType, null,
                     request.getRemoteAddr(), request.getHeader("User-Agent"), success, costMs);
         }
     }
 
+    static String operation(String path,String method) {
+        return DriveOperationHistory.classify(path, method);
+    }
+    private String area(String path) {
+        if (path == null) return "API";
+        String remainder = path.substring(Math.min(path.length(), "/api/v1/".length()));
+        int slash = remainder.indexOf('/');
+        String area = slash < 0 ? remainder : remainder.substring(0, slash);
+        String normalized = area.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
+        return normalized.isBlank() ? "API" : normalized;
+    }
 }

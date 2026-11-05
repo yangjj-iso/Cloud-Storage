@@ -4,6 +4,7 @@ import com.cloudchunk.common.model.R;
 import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.knowledge.KnowledgeModels.*;
 import com.cloudchunk.core.knowledge.KnowledgeService;
+import com.cloudchunk.core.knowledge.ResearchBriefService;
 import com.cloudchunk.core.knowledge.GroundedAnswerService;
 import com.cloudchunk.core.knowledge.SemanticIndexService;
 import com.cloudchunk.core.knowledge.HybridSearchService;
@@ -12,7 +13,10 @@ import com.cloudchunk.core.knowledge.AiDailyCallBudget;
 import com.cloudchunk.core.knowledge.QdrantMirrorService;
 import com.cloudchunk.core.knowledge.AiRenameAgentService;
 import com.cloudchunk.core.knowledge.AiMoveAgentService;
+import com.cloudchunk.core.knowledge.AiWorkflowService;
 import com.cloudchunk.api.monitoring.KnowledgeRetrievalMetrics;
+import com.cloudchunk.api.monitoring.BusinessSliMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/knowledge")
 public class KnowledgeController {
     private final KnowledgeService service;
+    @Autowired private ResearchBriefService researchBrief;
     private final GroundedAnswerService assistant;
     private final SemanticIndexService semantic;
     private final HybridSearchService hybrid;
@@ -30,7 +35,9 @@ public class KnowledgeController {
     private final QdrantMirrorService mirror;
     private final AiRenameAgentService renameAgent;
     private final AiMoveAgentService moveAgent;
+    @org.springframework.beans.factory.annotation.Autowired private AiWorkflowService workflows;
     private final KnowledgeRetrievalMetrics retrievalMetrics;
+    @Autowired(required = false) private BusinessSliMetrics businessSli;
     public KnowledgeController(KnowledgeService service, GroundedAnswerService assistant,
                                SemanticIndexService semantic, HybridSearchService hybrid,
                                AutoAnswerService autoAnswer, AiDailyCallBudget budget,
@@ -50,11 +57,28 @@ public class KnowledgeController {
     public record SemanticSearchRequest(String query,boolean consent) {}
     public record SemanticIndexRequest(boolean consent) {}
     public record SearchRequest(String query) {}
+    public record BatchIndexRequest(java.util.List<String> userFileIds) {}
 
     @GetMapping("/documents")
     public ResponseEntity<R<Library>> library(@RequestParam(defaultValue="1") int page) {
         return noStore(service.library(UserContext.requireUserId(), page));
     }
+    public record ResearchBriefRequest(java.util.List<SourceRef> sources) {}
+
+    @PostMapping("/research/brief")
+    public ResponseEntity<R<ResearchBriefService.Brief>> researchBrief(@RequestBody ResearchBriefRequest request) {
+        if (request == null) throw com.cloudchunk.common.exception.BizException.of(
+                com.cloudchunk.common.exception.ErrorCode.INVALID_PARAMETER);
+        return noStore(researchBrief.prepare(UserContext.requireUserId(), request.sources()));
+    }
+
+    @PostMapping("/documents/index/batch")
+    public ResponseEntity<R<BatchIndexResult>> indexBatch(@RequestBody BatchIndexRequest request) {
+        if (request == null) throw com.cloudchunk.common.exception.BizException.of(
+                com.cloudchunk.common.exception.ErrorCode.INVALID_PARAMETER);
+        return noStore(service.requestIndexBatch(UserContext.requireUserId(), request.userFileIds()));
+    }
+
     @PostMapping("/search")
     public ResponseEntity<R<SearchResult>> search(@RequestBody SearchRequest request) {
         long userId=UserContext.requireUserId();
@@ -85,7 +109,9 @@ public class KnowledgeController {
     }
     @PostMapping("/assistant/ask")
     public ResponseEntity<R<AutoAskResponse>> autoAsk(@RequestBody AutoAskRequest request) {
-        return noStore(autoAnswer.ask(UserContext.requireUserId(), request));
+        AutoAskResponse response = autoAnswer.ask(UserContext.requireUserId(), request);
+        if (businessSli != null) businessSli.aiRetrieval(response.retrievalMode());
+        return noStore(response);
     }
     @GetMapping("/assistant/rename/capabilities")
     public ResponseEntity<R<AiRenameAgentService.Capabilities>> renameCapabilities() {
@@ -116,6 +142,49 @@ public class KnowledgeController {
             @RequestParam long userFileId) {
         return noStore(moveAgent.folderChoices(UserContext.requireUserId(),userFileId));
     }
+    @PostMapping("/assistant/workflows")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> createWorkflow(
+            @RequestBody AiWorkflowService.CreateRequest request) {
+        return noStore(workflows.create(UserContext.requireUserId(),request));
+    }
+    @GetMapping("/assistant/workflows")
+    public ResponseEntity<R<java.util.List<AiWorkflowService.Summary>>> recentWorkflows() {
+        return noStore(workflows.recent(UserContext.requireUserId()));
+    }
+    @GetMapping("/assistant/workflows/{id}")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> workflow(@PathVariable String id) {
+        return noStore(workflows.detail(UserContext.requireUserId(),id));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/approve")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> approveWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.approve(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/skip")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> skipWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.skip(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/execute")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> executeWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.execute(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/steps/{stepNo}/undo")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> undoWorkflowStep(
+            @PathVariable String id,@PathVariable int stepNo,
+            @RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.undo(UserContext.requireUserId(),id,stepNo,request));
+    }
+    @PostMapping("/assistant/workflows/{id}/cancel")
+    public ResponseEntity<R<AiWorkflowService.Workflow>> cancelWorkflow(
+            @PathVariable String id,@RequestBody AiWorkflowService.ConfirmRequest request) {
+        return noStore(workflows.cancel(UserContext.requireUserId(),id,request));
+    }
+
     @PostMapping("/assistant/move/batch/suggest")
     public ResponseEntity<R<AiMoveAgentService.BatchPreview>> batchSuggestMoves(
             @RequestBody AiMoveAgentService.BatchSuggestRequest request) {
@@ -152,8 +221,10 @@ public class KnowledgeController {
     @PostMapping("/semantic/search")
     public ResponseEntity<R<SearchResult>> semanticSearch(@RequestBody SemanticSearchRequest request) {
         long userId=UserContext.requireUserId();
-        return noStore(retrievalMetrics.measure("hybrid",
-            ()->hybrid.search(userId,request.query(),request.consent())));
+        SearchResult response = retrievalMetrics.measure("hybrid",
+            ()->hybrid.search(userId,request.query(),request.consent()));
+        if (businessSli != null) businessSli.aiRetrieval(response.mode());
+        return noStore(response);
     }
     @PostMapping("/documents/{id}/semantic-index")
     public ResponseEntity<R<SemanticIndexService.Status>> semanticIndex(@PathVariable long id,

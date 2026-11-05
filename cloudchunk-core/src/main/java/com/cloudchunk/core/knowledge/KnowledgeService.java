@@ -97,6 +97,38 @@ public class KnowledgeService {
         events.enqueue(FileAvailable.TOPIC, fileId, FileAvailable.of(fileId));
     }
 
+    /**
+     * All-or-nothing authorization BEFORE queueing any extraction event. This
+     * operation only submits existing, AVAILABLE files owned by the current user.
+     * Semantic embedding requires a distinct, per-file consented action.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public BatchIndexResult requestIndexBatch(long userId, List<String> userFileIds) {
+        if (userFileIds == null || userFileIds.isEmpty() || userFileIds.size() > 8) {
+            throw BizException.of(ErrorCode.INVALID_PARAMETER, "select 1-8 unique document entries");
+        }
+        // JS cannot safely round-trip all SQL BIGINT values as JSON numbers.
+        // Accept canonical decimal strings and reject aliases, overflow and duplicates.
+        List<Long> ids = new java.util.ArrayList<>();
+        for (String value : userFileIds) {
+            if (value == null || !value.matches("[1-9][0-9]{0,18}")) {
+                throw BizException.of(ErrorCode.INVALID_PARAMETER, "invalid document entry");
+            }
+            try {
+                ids.add(Long.parseLong(value));
+            } catch (NumberFormatException ex) {
+                throw BizException.of(ErrorCode.INVALID_PARAMETER, "invalid document entry");
+            }
+        }
+        if (ids.stream().distinct().count() != ids.size()) {
+            throw BizException.of(ErrorCode.INVALID_PARAMETER, "duplicate document entries");
+        }
+        // Reject the entire request before any database write or outbox enqueue.
+        for (Long id : ids) authorize(userId, id);
+        for (Long id : ids) requestIndex(userId, id);
+        return new BatchIndexResult(ids.size(), 8);
+    }
+
     @Transactional
     public void recoverPending() {
         jdbc.update("""

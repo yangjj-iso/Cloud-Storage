@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { MaterialIcon } from './ui/MaterialIcon';
 
 const mainItems: Array<{ id: View; label: string; icon: string }> = [
+  { id: 'ai', label: 'AI 智能工作台', icon: 'auto_awesome' },
   { id: 'upload', label: '上传中心', icon: 'cloud_upload' },
   { id: 'drive', label: '我的云盘', icon: 'folder_shared' },
   { id: 'files', label: '文件列表', icon: 'list_alt' },
@@ -16,6 +17,7 @@ const adminItems: Array<{ id: AdminTab; label: string; icon: string }> = [
   { id: 'users', label: '用户管理', icon: 'group' },
   { id: 'files', label: '文件管理', icon: 'folder_managed' },
   { id: 'settings', label: '系统设置', icon: 'settings_applications' },
+  { id: 'health', label: '依赖状态', icon: 'monitor_heart' },
 ];
 
 export function Sidebar() {
@@ -42,7 +44,7 @@ export function Sidebar() {
         </span>
         <span>
           <span className="block text-[24px] font-bold leading-7 tracking-[-0.025em] text-primary">CloudChunk</span>
-          <span className="block text-label-sm text-on-surface-variant">个人云存储</span>
+          <span className="block text-label-sm text-on-surface-variant">AI-Native 云存储</span>
         </span>
       </button>
 
