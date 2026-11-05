@@ -102,6 +102,26 @@ class DriveNameUniquenessIT {
         assertTrue(names.contains("REPORT (1).TXT"));
     }
 
+    @Test void auditHistoryReturnsOnlyCurrentUsersOperationsAndNoRequestBodies() {
+        long alice=72001L,bob=72002L;
+        jdbc.update("""
+            INSERT INTO op_log(user_id,op_type,target_id,result,cost_ms,created_at)
+            VALUES(?, 'DRIVE_RENAME','/api/v1/drive/rename',1,12,NOW(3)),
+                  (?, 'AI_MOVE_UNDO','/api/v1/knowledge/assistant/move/abc/undo',0,34,NOW(3)),
+                  (?, 'DRIVE_PURGE','/api/v1/recycle/55',1,5,NOW(3)),
+                  (?, 'DRIVE_POST','/api/v1/drive/rename',1,3,NOW(3))
+            """,alice,alice,bob,alice);
+        var history=new com.cloudchunk.core.audit.service.DriveOperationHistory(jdbc);
+        var aliceEvents=history.recent(alice);
+        var bobEvents=history.recent(bob);
+        assertEquals(2,aliceEvents.size());
+        assertTrue(aliceEvents.stream().anyMatch(e->e.operation().equals("DRIVE_RENAME") && e.success()));
+        assertTrue(aliceEvents.stream().anyMatch(e->e.operation().equals("AI_MOVE_UNDO") && !e.success()));
+        assertEquals(1,bobEvents.size());
+        assertEquals("DRIVE_PURGE",bobEvents.getFirst().operation());
+        assertTrue(history.recent(72003L).isEmpty());
+    }
+
     @Test void competingDirectoryCreatesCannotBothWinUnderRealMySql() throws Exception {
         long userId=71004;
         int competitors=24;

@@ -2,6 +2,7 @@ package com.cloudchunk.api.filter;
 
 import com.cloudchunk.common.trace.UserContext;
 import com.cloudchunk.core.audit.service.OperationAuditService;
+import com.cloudchunk.core.audit.service.DriveOperationHistory;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -12,8 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Locale;
 import java.util.Set;
+import java.util.Locale;
 
 @Component
 @Order(20)
@@ -55,18 +56,7 @@ public class OperationAuditFilter extends OncePerRequestFilter {
     }
 
     static String operation(String path,String method) {
-        if(path==null)return "API_OTHER";
-        if(path.equals("/api/v1/drive/mkdir"))return "DRIVE_MKDIR";
-        if(path.equals("/api/v1/drive/rename"))return "DRIVE_RENAME";
-        if(path.equals("/api/v1/drive/move"))return "DRIVE_MOVE";
-        if(path.matches("/api/v1/drive/[0-9]+") && "DELETE".equalsIgnoreCase(method))
-            return "DRIVE_RECYCLE";
-        if(path.matches("/api/v1/recycle/[0-9]+/restore"))return "DRIVE_RESTORE";
-        if(path.matches("/api/v1/recycle/[0-9]+") && "DELETE".equalsIgnoreCase(method))
-            return "DRIVE_PURGE";
-        String remainder=path.startsWith("/api/v1/")?path.substring("/api/v1/".length()):"API";
-        String area=remainder.split("/")[0].replaceAll("[^A-Za-z0-9]","").toUpperCase(Locale.ROOT);
-        return (area.isBlank()?"API":area)+"_"+method.toUpperCase(Locale.ROOT);
+        return DriveOperationHistory.classify(path, method);
     }
     private String area(String path) {
         if (path == null) return "API";

@@ -27,7 +27,9 @@ export function DriveView() {
   const [auditBusy,setAuditBusy]=useState(false);
   const loadAudit=async()=>{
     setAuditBusy(true);setAuditError('');
-    try{setAudits(await api.driveAudit());}
+    try{setAudits((await api.driveRecentAudit()).map(event => ({
+      operation:event.operation,success:event.success,costMs:event.elapsedMs,at:event.createdAt,
+    })));}
     catch(e){setAuditError(e instanceof Error?e.message:'操作记录读取失败');}
     finally{setAuditBusy(false);}
   };
@@ -40,6 +42,10 @@ export function DriveView() {
   const submitFolder = async () => {
     if (!newDirName.trim()) return;
     if(busyAction)return;
+    if(driveFiles.some(file => file.fileName.toLocaleLowerCase()===newDirName.trim().toLocaleLowerCase())) {
+      setMkdirError('此目录已有同名文件或文件夹，请修改名称再试');
+      return;
+    }
     setBusyAction(true);setMkdirError('');
     try{
       await api.driveMkdir(driveParentId,newDirName.trim());
@@ -113,7 +119,9 @@ export function DriveView() {
         <div className="max-h-44 overflow-y-auto">
           {audits.map((a,i)=><div key={i} className="flex justify-between gap-sm border-b py-xs text-body-sm">
             <span>{({DRIVE_MKDIR:'新建目录',DRIVE_RENAME:'重命名',DRIVE_MOVE:'移动',
-              DRIVE_RECYCLE:'移入回收站',DRIVE_RESTORE:'还原',DRIVE_PURGE:'彻底删除'} as Record<string,string>)[a.operation]||a.operation}
+              DRIVE_RECYCLE:'移入回收站',DRIVE_RESTORE:'还原',DRIVE_PURGE:'彻底删除',SHARE_SAVE:'分享转存',
+              AI_RENAME_SUGGEST:'AI 重命名建议',AI_RENAME_APPLY:'批准 AI 重命名',
+              AI_MOVE_SUGGEST:'AI 归类建议',AI_MOVE_APPLY:'批准 AI 移动',AI_MOVE_UNDO:'撤销 AI 移动'} as Record<string,string>)[a.operation]||a.operation}
               {' · '}{a.success?'成功':'失败'}</span><span>{a.at}</span>
           </div>)}
         </div>
@@ -138,7 +146,12 @@ export function DriveView() {
                   <input aria-label={`选择 ${file.fileName}`} type="checkbox" checked={isSelected} onChange={() => toggle(file.id)} className="h-4 w-4 shrink-0 rounded accent-primary" />
                   <MaterialIcon filled className={`shrink-0 ${appearance.color}`}>{appearance.icon}</MaterialIcon>
                   {renameId === file.id ? (
-                    <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={() => setRenameId(null)} onKeyDown={async (event) => { if (event.key === 'Enter' && renameValue.trim()) {
+                    <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onKeyDown={async (event) => {
+                      if(event.key==='Escape'){setRenameId(null);setRenameError('');return;}
+                      if (event.key === 'Enter' && renameValue.trim()) {
+                      if(driveFiles.some(other => other.id!==file.id && other.fileName.toLocaleLowerCase()===renameValue.trim().toLocaleLowerCase())) {
+                        setRenameError('存在同名条目，请修改后重试');return;
+                      }
                       setRenameError('');
                       try{await api.driveRename(file.id,renameValue.trim());setRenameId(null);void refreshDrive();}
                       catch(e){setRenameError(isConflict(e)?'存在同名条目，请修改后重试':e instanceof Error?e.message:'重命名失败');}
@@ -186,7 +199,7 @@ export function DriveView() {
             <h2 className="text-headline-md">移动文件</h2><p className="mt-xs text-body-md text-on-surface-variant">请输入目标文件夹编号；输入 0 表示根目录。</p>
             <label className="mt-lg block text-label-sm text-on-surface-variant">目标文件夹编号<input autoFocus type="number" min="0" value={targetParentId} onChange={(event) => setTargetParentId(event.target.value)} className="stitch-focus mt-xs h-10 w-full rounded border border-outline-variant px-sm text-body-md" /></label>
             {moveError && <p role="alert" className="mt-sm text-error text-label-sm">{moveError}</p>}
-            <div className="mt-lg flex justify-end gap-sm"><button type="button" onClick={() => setMovingId(null)} className="h-10 rounded px-md text-label-md text-on-surface-variant">取消</button><button type="button" onClick={async () => {try{await api.driveMove(movingId,Math.max(0,Number(targetParentId)||0));setMovingId(null);void refreshDrive();}
+            <div className="mt-lg flex justify-end gap-sm"><button type="button" onClick={() => setMovingId(null)} className="h-10 rounded px-md text-label-md text-on-surface-variant">取消</button><button type="button" onClick={async () => {try{const target=Number(targetParentId);if(!Number.isSafeInteger(target)||target<0){setMoveError('请输入有效的目标目录编号');return;}await api.driveMove(movingId,target);setMovingId(null);void refreshDrive();}
               catch(e){setMoveError(isConflict(e)?'目标目录存在同名文件或文件夹，请选择其他位置':e instanceof Error?e.message:'移动失败');}}} className="h-10 rounded bg-primary px-md text-label-md text-white">确认移动</button></div>
           </div>
         </div>

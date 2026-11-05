@@ -41,8 +41,8 @@ export interface FilesSlice {
 export interface DriveSlice {
   driveFiles: UserFileItem[]; driveParentId: number; driveLoading: boolean;
   recycleFiles: UserFileItem[]; recycleLoading: boolean;
-  refreshDrive: (parentId?: number) => Promise<void>; driveMkdir: (parentId: number, name: string) => Promise<void>;
-  driveRename: (id: number, newName: string) => Promise<void>; driveMove: (id: number, newParentId: number) => Promise<void>;
+  refreshDrive: (parentId?: number) => Promise<void>; driveMkdir: (parentId: number, name: string) => Promise<boolean>;
+  driveRename: (id: number, newName: string) => Promise<boolean>; driveMove: (id: number, newParentId: number) => Promise<boolean>;
   driveDelete: (id: number) => Promise<void>; refreshRecycle: () => Promise<void>;
   recycleRestore: (id: number) => Promise<void>; recycleHardDelete: (id: number) => Promise<void>;
 }

@@ -12,6 +12,7 @@ import com.cloudchunk.core.drive.dto.UserFileItem;
 import com.cloudchunk.core.drive.service.DriveZipService;
 import com.cloudchunk.core.drive.service.UserFileService;
 import com.cloudchunk.core.audit.service.OperationAuditService;
+import com.cloudchunk.core.audit.service.DriveOperationHistory;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -40,12 +41,21 @@ public class DriveController {
     private final UserFileService userFileService;
     private final DriveZipService driveZipService;
     private final OperationAuditService audit;
+    private final DriveOperationHistory operationHistory;
 
     public DriveController(UserFileService userFileService, DriveZipService driveZipService,
-                           OperationAuditService audit) {
+                           OperationAuditService audit, DriveOperationHistory operationHistory) {
         this.userFileService = userFileService;
         this.driveZipService = driveZipService;
         this.audit = audit;
+        this.operationHistory = operationHistory;
+    }
+
+    @GetMapping("/audit/recent")
+    public ResponseEntity<R<List<DriveOperationHistory.Event>>> recentActivity() {
+        long userId = UserContext.requireUserId();
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(R.ok(operationHistory.recent(userId)));
     }
 
     @GetMapping("/audit")

@@ -161,6 +161,7 @@ npm run dev
 - [AI 整理体验 M3.0](./docs/21-ai-folder-shortlist-history.md)：自主选择文件夹候选、同名冲突预检与历史记录面板。
 - [AI 批量预览与条件撤销 M3.1](./docs/22-ai-batch-preview-and-undo.md)：最多四份文件批量建议、逐条批准与15分钟条件撤销。
 - [统一目录命名 M3.2](./docs/23-drive-sibling-name-invariants.md)：MySQL 活跃文件名唯一约束、冲突反馈、上传及转存重名后缀、并发回归。
+- [M3.3 文件操作审计与冲突体验](./docs/24-drive-audit-and-conflict-ui.md)：用户级操作记录、冲突后继续编辑及真实数据库测试。
 - [网盘冲突与操作审计 M3.3](./docs/24-drive-audit-conflict-ui.md)：用户级操作记录、固定审计分类和冲突提示。
 - [M3.4 上线预检与验收](./docs/25-release-preflight-and-acceptance.md)：只读历史重名/Flyway/健康检查、真实迁移阻断回归和隔离账号端到端验收。
 - [M3.5 正式发布准备](./docs/26-release-readiness.md)：生产配置门禁、不可变镜像、协调备份/隔离恢复演练及回滚 SOP。
